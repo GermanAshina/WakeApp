@@ -1,5 +1,7 @@
 package com.german.wakeapp
 
+import org.json.JSONArray
+import org.json.JSONObject
 import android.content.Context
 import android.content.Intent
 import android.hardware.Sensor
@@ -83,7 +85,6 @@ class ChallengeActivity : ComponentActivity() {
                     else -> PurplePrimary
                 }
 
-                // Fondo animado que "respira"
                 val infinite = rememberInfiniteTransition(label = "bg")
                 val scale by infinite.animateFloat(
                     initialValue = 0.8f, targetValue = 1.2f,
@@ -103,20 +104,83 @@ class ChallengeActivity : ComponentActivity() {
                         )
                 ) {
                     when (challengeType) {
-                        "TRACING" -> TracingChallengeScreen(difficulty, onSuccess = { stopAndFinish() })
-                        "STROOP" -> StroopChallengeScreen(difficulty, onSuccess = { stopAndFinish() })
-                        "SHAKE" -> ShakeChallengeScreen(difficulty, onSuccess = { stopAndFinish() })
-                        else -> StandardChallengeScreen(challengeType, difficulty, onSuccess = { stopAndFinish() })
+                        "TRACING" -> TracingChallengeScreen(difficulty, onSuccess = { stopAndFinish(difficulty) })
+                        "STROOP" -> StroopChallengeScreen(difficulty, onSuccess = { stopAndFinish(difficulty) })
+                        "SHAKE" -> ShakeChallengeScreen(difficulty, onSuccess = { stopAndFinish(difficulty) })
+                        else -> StandardChallengeScreen(challengeType, difficulty, onSuccess = { stopAndFinish(difficulty) })
                     }
                 }
             }
         }
     }
 
-    private fun stopAndFinish() {
+    private fun stopAndFinish(difficulty: String) {
         val streakManager = StreakManager(this)
-        streakManager.registerSuccessfulWakeUp()
+        val achievementManager = AchievementManager(this)
+
+        val levelBefore = streakManager.getLevel()
+
+        // 1) Registrar despertar (sube racha +50 puntos base)
+        val newStreak = streakManager.registerSuccessfulWakeUp()
+
+        // 2) XP según dificultad
+        val xpGained = when (difficulty) {
+            "EASY" -> 40
+            "MEDIUM" -> 60
+            "HARD" -> 90
+            "EXTREME" -> 150
+            else -> 60
+        }
+        val levelsUpByXp = streakManager.addXp(xpGained)
+
+        // 3) Comprobar logros contra la racha NUEVA
+        val newlyUnlocked = achievementManager.checkStreakAchievements(newStreak)
+
+        // 4) Por cada logro: +1 nivel limpio y +rewardPoints puntos
+        val bonusLevels = newlyUnlocked.size
+        val bonusPoints = newlyUnlocked.sumOf { it.rewardPoints }
+        if (bonusLevels > 0) streakManager.addLevels(bonusLevels)
+        if (bonusPoints > 0) streakManager.addPoints(bonusPoints)
+
+        val levelAfter = streakManager.getLevel()
+
+        // 5) Serializar logros para la recompensa pendiente
+        val achievementsJson = if (newlyUnlocked.isEmpty()) null else {
+            val arr = org.json.JSONArray()
+            newlyUnlocked.forEach { ach ->
+                arr.put(
+                    org.json.JSONObject().apply {
+                        put("id", ach.id)
+                        put("title", ach.title)
+                        put("emoji", ach.emoji)
+                        put("rewardPoints", ach.rewardPoints)
+                    }
+                )
+            }
+            arr.toString()
+        }
+
+        // 6) Guardar recompensa pendiente (para MainActivity)
+        streakManager.setPendingReward(
+            xp = xpGained,
+            levelUp = (levelsUpByXp > 0 || bonusLevels > 0),
+            oldLevel = levelBefore,
+            newLevel = levelAfter,
+            achievementsJson = achievementsJson,
+            bonusLevels = bonusLevels,
+            bonusPoints = bonusPoints
+        )
+
         stopService(Intent(this, AlarmService::class.java))
+
+        val result = Intent().apply {
+            putExtra("XP_GAINED", xpGained)
+            putExtra("LEVEL_UP", levelsUpByXp > 0 || bonusLevels > 0)
+            putExtra("NEW_LEVEL", levelAfter)
+            putExtra("OLD_LEVEL", levelBefore)
+            putExtra("ACHIEVEMENTS_COUNT", newlyUnlocked.size)
+        }
+        setResult(RESULT_OK, result)
         finish()
     }
 }
@@ -313,8 +377,6 @@ fun StandardChallengeScreen(challengeType: String, difficulty: String, onSuccess
         )
     }
 }
-
-// El resto de desafíos (Tracing, Stroop, Shake) se mantienen idénticos a tu código original pero heredando estos efectos visuales de botones y tarjetas.
 
 enum class ShapeType(val title: String) { CIRCLE("Círculo Neón"), TRIANGLE("Triángulo"), STAR("Estrella"), HEART("Corazón"), WAVE("Onda Senoidal") }
 

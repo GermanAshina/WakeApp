@@ -8,7 +8,7 @@ val SurfaceDark = Color(0xFF1A1212)          // Superficie base
 val CardBackground = Color(0xFF261919)       // Tarjetas un poco más claras
 val CardBorder = Color(0xFF3D2626)           // Borde más elegante
 
-// Rojos apagados y muy apagadosdfdf
+// Rojos apagados y muy apagados
 val RedPrimary = Color(0xFF9E3333)
 val RedAccent = Color(0xFFD14545)
 val RedMuted = Color(0xFF5C2020)

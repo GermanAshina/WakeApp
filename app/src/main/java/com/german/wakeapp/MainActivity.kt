@@ -35,21 +35,24 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.german.wakeapp.ui.theme.*
+import kotlinx.coroutines.delay
 import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
@@ -93,6 +96,16 @@ data class AlarmItem(
     val difficulty: String = "MEDIUM",
     val soundUri: String? = null,
     val soundName: String? = null
+)
+
+data class RewardInfo(
+    val xpGained: Int,
+    val levelUp: Boolean,
+    val oldLevel: Int,
+    val newLevel: Int,
+    val achievements: List<RewardAchievement> = emptyList(),
+    val bonusLevels: Int = 0,
+    val bonusPoints: Int = 0
 )
 
 fun challengeAccent(type: String): Color = when (type) {
@@ -158,7 +171,6 @@ fun AnimatedBackground() {
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
-        // Capa oscura semitransparente para que el texto sea legible sobre cualquier imagen
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -171,17 +183,23 @@ fun AnimatedBackground() {
 fun MainHeader(
     streak: Int,
     points: Int,
-    sectionTitle: String,
+    level: Int,
+    xp: Int,
     onInfoClick: () -> Unit,
-    onAddPoints: () -> Unit
+    onAddPoints: () -> Unit,
+    onRewardsClick: () -> Unit
 ) {
     val animatedPoints by animateIntAsState(targetValue = points, label = "pts")
     val animatedStreak by animateIntAsState(targetValue = streak, label = "strk")
+    val animatedXp by animateIntAsState(targetValue = xp, label = "xp")
+
+    val xpNeeded = StreakManager.xpForLevel(level)
+    val xpProgress = (animatedXp.toFloat() / xpNeeded).coerceIn(0f, 1f)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(DarkBackground.copy(alpha = 0.85f)) // Fondo semitransparente
+            .background(DarkBackground.copy(alpha = 0.85f))
             .statusBarsPadding()
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
@@ -217,9 +235,10 @@ fun MainHeader(
                     letterSpacing = (-0.5).sp
                 )
                 Text(
-                    sectionTitle,
+                    "Nivel $level",
                     fontSize = 11.sp,
-                    color = TextMuted
+                    color = AmberAccent,
+                    fontWeight = FontWeight.Bold
                 )
             }
 
@@ -238,7 +257,60 @@ fun MainHeader(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(AmberAccent.copy(alpha = 0.15f))
+                    .border(1.5.dp, AmberAccent, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("$level", fontSize = 13.sp, fontWeight = FontWeight.Black, color = AmberAccent)
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                LinearProgressIndicator(
+                    progress = { xpProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    color = AmberAccent,
+                    trackColor = SurfaceDark
+                )
+                Spacer(modifier = Modifier.height(3.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("XP", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        // ICONO DE REGALO PARA VER RECOMPENSAS
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(AmberAccent.copy(alpha = 0.2f))
+                                .clickable { onRewardsClick() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🎁", fontSize = 10.sp)
+                        }
+                    }
+                    Text("$animatedXp / $xpNeeded", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -298,14 +370,18 @@ fun MainScreen() {
 
     var currentStreak by remember { mutableIntStateOf(streakManager.getStreak()) }
     var points by remember { mutableIntStateOf(streakManager.getPoints()) }
+    var currentLevel by remember { mutableIntStateOf(streakManager.getLevel()) }
+    var currentXp by remember { mutableIntStateOf(streakManager.getXp()) }
     var alarms by remember { mutableStateOf(alarmRepository.loadAll()) }
     var showTimePicker by remember { mutableStateOf(false) }
     var showInfoDialog by remember { mutableStateOf(false) }
+    var showRewardsDialog by remember { mutableStateOf(false) }
     var selectedChallengeType by remember { mutableStateOf("MATH") }
     var selectedDifficulty by remember { mutableStateOf("MEDIUM") }
     var pendingSoundUri by remember { mutableStateOf<String?>(null) }
     var pendingSoundName by remember { mutableStateOf<String?>(null) }
     var currentSection by remember { mutableStateOf(AppSection.ALARMS) }
+    var rewardDialog by remember { mutableStateOf<RewardInfo?>(null) }
 
     LaunchedEffect(Unit) {
         alarms.filter { it.isEnabled }.forEach { scheduleAlarm(context, it) }
@@ -313,6 +389,34 @@ fun MainScreen() {
 
     LaunchedEffect(alarms) {
         alarmRepository.saveAll(alarms)
+    }
+
+    // Refrescar al volver a la app (por si la recompensa se generó con la app cerrada)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                currentStreak = streakManager.getStreak()
+                points = streakManager.getPoints()
+                currentLevel = streakManager.getLevel()
+                currentXp = streakManager.getXp()
+
+                // Recompensa pendiente (llegó estando en segundo plano / cerrada)
+                streakManager.consumePendingReward()?.let { data ->
+                    rewardDialog = RewardInfo(
+                        xpGained = data.xp,
+                        levelUp = data.levelUp,
+                        oldLevel = data.oldLevel,
+                        newLevel = data.newLevel,
+                        achievements = data.achievements,
+                        bonusLevels = data.bonusLevels,
+                        bonusPoints = data.bonusPoints
+                    )
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val soundPickerLauncher = rememberLauncherForActivityResult(
@@ -353,17 +457,13 @@ fun MainScreen() {
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
-                val title = when (currentSection) {
-                    AppSection.ALARMS -> "Tus alarmas"
-                    AppSection.PROGRESS -> "Tu progreso"
-                    AppSection.SHOP -> "Tienda neón"
-                    AppSection.READING -> "Modo lectura"
-                }
                 MainHeader(
                     streak = currentStreak,
                     points = points,
-                    sectionTitle = title,
+                    level = currentLevel,
+                    xp = currentXp,
                     onInfoClick = { showInfoDialog = true },
+                    onRewardsClick = { showRewardsDialog = true },
                     onAddPoints = {
                         streakManager.addPoints(10)
                         points = streakManager.getPoints()
@@ -403,7 +503,6 @@ fun MainScreen() {
             }
         ) { paddingValues ->
             Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-                // Animación de transición entre secciones
                 AnimatedContent(
                     targetState = currentSection,
                     transitionSpec = {
@@ -422,13 +521,27 @@ fun MainScreen() {
                                 alarms = alarms.filter { it.id != alarm.id }
                             }
                         )
-                        AppSection.PROGRESS -> ProgressSection(context = context, streak = currentStreak, points = points)
-                        AppSection.SHOP -> ShopSection(
+                        AppSection.PROGRESS -> ProgressSection(
+                            context = context,
+                            streak = currentStreak,
                             points = points,
-                            onBuy = { cost ->
-                                if (streakManager.spendPoints(cost)) points = streakManager.getPoints()
-                            }
+                            level = currentLevel,
+                            xp = currentXp
                         )
+                        AppSection.SHOP -> {
+                            // TODO: nueva tienda
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "Próximamente…",
+                                    color = TextMuted,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                         AppSection.READING -> ReadingSection(manager = readingModeManager)
                     }
                 }
@@ -460,6 +573,192 @@ fun MainScreen() {
 
                 if (showInfoDialog) {
                     InfoDialog(onDismiss = { showInfoDialog = false })
+                }
+
+                if (showRewardsDialog) {
+                    LevelRewardsDialog(onDismiss = { showRewardsDialog = false })
+                }
+
+                rewardDialog?.let { info ->
+                    if (info.achievements.isNotEmpty()) {
+                        AchievementUnlockedOverlay(
+                            info = info,
+                            onDismiss = {
+                                // refrescar contadores por si el nivel subió por logros
+                                currentLevel = streakManager.getLevel()
+                                currentXp = streakManager.getXp()
+                                points = streakManager.getPoints()
+                                currentStreak = streakManager.getStreak()
+                                rewardDialog = null
+                            }
+                        )
+                    } else {
+                        XpRewardDialog(
+                            info = info,
+                            onDismiss = { rewardDialog = null }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LevelRewardsDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CardBackground,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(36.dp).clip(CircleShape).background(AmberAccent.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🎁", fontSize = 18.sp)
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Recompensas de Nivel", color = TextWhite, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Cada vez que subas de nivel superando desafíos, obtendrás recompensas directas en tu cuenta:",
+                    fontSize = 13.sp, color = TextWhite, fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Tarjeta de recompensa
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SurfaceDark)
+                        .border(1.dp, AmberAccent.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(CircleShape).background(AmberAccent.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("⚡", fontSize = 20.sp)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("Puntos de Energía", color = AmberAccent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Gana +50 🪙 por cada nivel alcanzado.", color = TextMuted, fontSize = 12.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Recuerda: resolver desafíos también te otorga XP y puntos directamente. ¡Mantén tu racha activa!",
+                    fontSize = 12.sp, color = TextMuted, lineHeight = 18.sp
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("¡A por ello!", color = AmberAccent, fontWeight = FontWeight.Bold)
+            }
+        }
+    )
+}
+
+@Composable
+fun XpRewardDialog(info: RewardInfo, onDismiss: () -> Unit) {
+    val scale = remember { Animatable(0.6f) }
+    val glow = remember { Animatable(0f) }
+    var displayedXp by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        scale.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow))
+        glow.animateTo(1f, tween(400))
+        val steps = 30
+        for (i in 0..steps) {
+            displayedXp = (info.xpGained * i / steps)
+            delay(18)
+        }
+    }
+
+    Dialog(onDismissRequest = { /* bloquea el cierre por toque */ }) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .scale(scale.value)
+                .clip(RoundedCornerShape(28.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(CardBackground, SurfaceDark)
+                    )
+                )
+                .border(
+                    width = 2.dp,
+                    color = AmberAccent.copy(alpha = glow.value),
+                    shape = RoundedCornerShape(28.dp)
+                )
+                .padding(28.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val infinite = rememberInfiniteTransition(label = "reward")
+                val pulse by infinite.animateFloat(
+                    initialValue = 1f,
+                    targetValue = 1.15f,
+                    animationSpec = infiniteRepeatable(
+                        tween(900, easing = FastOutSlowInEasing),
+                        RepeatMode.Reverse
+                    ),
+                    label = "pulse"
+                )
+
+                Text(
+                    text = if (info.levelUp) "🎉" else "⭐",
+                    fontSize = 64.sp,
+                    modifier = Modifier.scale(pulse)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = if (info.levelUp) "¡NIVEL SUBIDO!" else "¡DESAFÍO COMPLETADO!",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    color = if (info.levelUp) AmberAccent else SuccessGreen,
+                    letterSpacing = 1.5.sp,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("+$displayedXp", fontSize = 42.sp, fontWeight = FontWeight.Black, color = AmberAccent)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("XP", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AmberAccent.copy(alpha = 0.8f))
+                }
+
+                if (info.levelUp) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Nivel ${info.oldLevel}", fontSize = 14.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("➜", fontSize = 16.sp, color = AmberAccent)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Nivel ${info.newLevel}", fontSize = 18.sp, color = TextWhite, fontWeight = FontWeight.Black)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberAccent),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("¡SEGUIR!", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
                 }
             }
         }
@@ -507,10 +806,6 @@ fun WakeBottomBar(current: AppSection, onSelect: (AppSection) -> Unit) {
     }
 }
 
-/* ================================================================
- *  SECCIÓN: ALARMAS (CON ANIMACIÓN DE ENTRADA)
- * ================================================================ */
-
 @Composable
 fun AlarmsSection(alarms: List<AlarmItem>, onToggle: (AlarmItem, Boolean) -> Unit, onDelete: (AlarmItem) -> Unit) {
     if (alarms.isEmpty()) {
@@ -522,11 +817,8 @@ fun AlarmsSection(alarms: List<AlarmItem>, onToggle: (AlarmItem, Boolean) -> Uni
             contentPadding = PaddingValues(bottom = 100.dp)
         ) {
             items(alarms, key = { it.id }) { alarm ->
-                // Animación de entrada para cada tarjeta
                 var visible by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) {
-                    visible = true
-                }
+                LaunchedEffect(Unit) { visible = true }
                 AnimatedVisibility(
                     visible = visible,
                     enter = fadeIn(animationSpec = tween(400)) + slideInVertically(
@@ -580,7 +872,6 @@ fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Uni
 
     val glow by animateFloatAsState(targetValue = if (alarm.isEnabled) 1f else 0f, animationSpec = tween(500), label = "glow")
 
-    // Glassmorphism: Fondo con transparencia y borde más luminoso
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -590,7 +881,7 @@ fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Uni
                 color = if (alarm.isEnabled) accentColor.copy(alpha = 0.5f * glow) else CardBorder,
                 shape = RoundedCornerShape(24.dp)
             ),
-        colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = 0.75f)), // Transparencia
+        colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = 0.75f)),
         shape = RoundedCornerShape(24.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
@@ -670,14 +961,11 @@ fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Uni
     }
 }
 
-/* ================================================================
- *  RESTO DE SECCIONES (PROGRESO, TIENDA, LECTURA, DIÁLOGOS)
- * ================================================================ */
-
 @Composable
-fun ProgressSection(context: Context, streak: Int, points: Int) {
+fun ProgressSection(context: Context, streak: Int, points: Int, level: Int, xp: Int) {
     val achievementManager = remember { AchievementManager(context) }
     val unlockedCount = remember { achievementManager.unlockedCount() }
+    val xpNeeded = StreakManager.xpForLevel(level)
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -702,9 +990,13 @@ fun ProgressSection(context: Context, streak: Int, points: Int) {
             shape = RoundedCornerShape(20.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
+                ProfileStatRow("Nivel", "$level 🎖️")
+                Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
+                ProfileStatRow("XP", "$xp / $xpNeeded ⚡")
+                Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
                 ProfileStatRow("Racha Activa", "$streak Días 🔥")
                 Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
-                ProfileStatRow("Puntos de Energía", "$points ⚡")
+                ProfileStatRow("Puntos de Energía", "$points 🪙")
                 Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
                 ProfileStatRow("Logros", "$unlockedCount / ${AchievementCatalog.all.size} 🏆")
                 Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
@@ -718,7 +1010,8 @@ fun ProgressSection(context: Context, streak: Int, points: Int) {
 
         AchievementCatalog.all.forEach { ach ->
             val unlocked = achievementManager.isUnlocked(ach.id)
-            AchievementRow(ach, unlocked)
+            val progress = achievementManager.getProgress(ach, streak)
+            AchievementRow(ach, unlocked, progress)
             Spacer(modifier = Modifier.height(8.dp))
         }
     }
@@ -733,7 +1026,7 @@ fun ProfileStatRow(label: String, value: String) {
 }
 
 @Composable
-fun AchievementRow(achievement: Achievement, unlocked: Boolean) {
+fun AchievementRow(achievement: Achievement, unlocked: Boolean, progress: Int) {
     Row(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
             .background(if (unlocked) CardBackground.copy(alpha = 0.8f) else SurfaceDark.copy(alpha = 0.5f))
@@ -743,99 +1036,67 @@ fun AchievementRow(achievement: Achievement, unlocked: Boolean) {
     ) {
         Text(achievement.emoji, fontSize = 24.sp, modifier = Modifier.width(40.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(achievement.title, color = if (unlocked) TextWhite else TextMuted, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text(
+                achievement.title,
+                color = if (unlocked) TextWhite else TextMuted,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
             Text(achievement.description, color = TextMuted, fontSize = 11.sp)
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Progreso: 0/1, 0/3, 0/7 (o 1/1, 3/3, 7/7 si desbloqueado)
+                Text(
+                    text = "$progress/${achievement.required}",
+                    color = if (unlocked) SuccessGreen else AmberAccent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black
+                )
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                // Recompensa visible: +1 Nivel (iconito) y +N 🪙
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(AmberAccent.copy(alpha = 0.18f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("⬆️", fontSize = 10.sp)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                "+1 Nivel",
+                                color = AmberAccent,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(SuccessGreen.copy(alpha = 0.18f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            "+${achievement.rewardPoints} 🪙",
+                            color = SuccessGreen,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
         }
         Text(if (unlocked) "✓" else "🔒", fontSize = 16.sp)
     }
 }
 
-data class ShopItem(val id: String, val name: String, val description: String, val price: Int, val icon: String)
-
-@Composable
-fun ShopSection(points: Int, onBuy: (Int) -> Unit) {
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("WakeAppPrefs", Context.MODE_PRIVATE) }
-    var hasShield by remember { mutableStateOf(prefs.getBoolean("item_shield", false)) }
-
-    val shopItems = listOf(
-        ShopItem("shield", "Escudo Protector", "Protege tu racha si fallas un despertar.", 100, "🛡️"),
-        ShopItem("snooze", "Pausa Temporal", "Otorga 5 minutos extra para preparar la mente.", 150, "⏳"),
-        ShopItem("focus", "Elixir de Enfoque", "Facilita la resolución de operaciones complejas.", 75, "🧪"),
-        ShopItem("gold_theme", "Tema Aurum", "Desbloquea la interfaz dorada exclusiva.", 300, "👑")
-    )
-
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Text("SUMINISTROS", fontSize = 24.sp, fontWeight = FontWeight.Black, color = AmberAccent, letterSpacing = 2.sp)
-                Text("Mejoras y ventajas", fontSize = 12.sp, color = TextMuted)
-            }
-            Box(
-                modifier = Modifier.clip(RoundedCornerShape(16.dp))
-                    .background(Brush.horizontalGradient(listOf(CardBackground, SurfaceDark)))
-                    .border(1.5.dp, RedAccent, RoundedCornerShape(16.dp))
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🪙", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("$points", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = TextWhite)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.weight(1f)) {
-            items(shopItems) { item ->
-                val isBought = item.id == "shield" && hasShield
-                val canAfford = points >= item.price
-                val borderColor = when {
-                    isBought -> SuccessGreen
-                    canAfford -> RedAccent
-                    else -> CardBorder
-                }
-
-                Card(
-                    modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(20.dp)).border(1.5.dp, borderColor, RoundedCornerShape(20.dp)),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = 0.8f)),
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(52.dp).clip(CircleShape).background(SurfaceDark), contentAlignment = Alignment.Center) {
-                                Text(item.icon, fontSize = 26.sp)
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column {
-                                Text(item.name, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextWhite)
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(item.description, fontSize = 12.sp, color = TextMuted, lineHeight = 16.sp)
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Button(
-                            enabled = !isBought && canAfford,
-                            onClick = {
-                                if (item.id == "shield") { hasShield = true; prefs.edit().putBoolean("item_shield", true).apply() }
-                                onBuy(item.price)
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isBought) SuccessGreen.copy(alpha = 0.2f) else RedPrimary,
-                                disabledContainerColor = SurfaceDark
-                            ),
-                            shape = RoundedCornerShape(14.dp),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            Text(if (isBought) "EQUIPADO" else "${item.price} 🪙", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = if (isBought) SuccessGreen else TextWhite)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun ReadingSection(manager: ReadingModeManager) {
@@ -1042,7 +1303,146 @@ fun NumberPicker(value: Int, range: IntRange, step: Int = 1, onValueChange: (Int
     }
 }
 
-// Lógica de alarmas intacta
+
+@Composable
+fun AchievementUnlockedOverlay(
+    info: RewardInfo,
+    onDismiss: () -> Unit
+) {
+    // Cola de logros: mostramos uno detrás de otro
+    var queue by remember { mutableStateOf(info.achievements.toList()) }
+    val current = queue.firstOrNull()
+
+    if (current == null) {
+        // Cuando terminan todos, cerramos
+        LaunchedEffect(Unit) { onDismiss() }
+        return
+    }
+
+    Dialog(onDismissRequest = { /* bloquea cierre por toque */ }) {
+        val scale = remember(current.id) { Animatable(0.5f) }
+        val glow = remember(current.id) { Animatable(0f) }
+        val pulse = rememberInfiniteTransition(label = "achPulse")
+        val pulseScale by pulse.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.15f,
+            animationSpec = infiniteRepeatable(
+                tween(700, easing = FastOutSlowInEasing),
+                RepeatMode.Reverse
+            ),
+            label = "pulseScale"
+        )
+
+        LaunchedEffect(current.id) {
+            scale.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow))
+            glow.animateTo(1f, tween(500))
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .scale(scale.value)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Brush.verticalGradient(listOf(CardBackground, SurfaceDark)))
+                .border(
+                    width = 2.dp,
+                    color = AmberAccent.copy(alpha = glow.value),
+                    shape = RoundedCornerShape(28.dp)
+                )
+                .padding(28.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = current.emoji,
+                    fontSize = 72.sp,
+                    modifier = Modifier.scale(pulseScale)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "¡LOGRO DESBLOQUEADO!",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    color = AmberAccent,
+                    letterSpacing = 1.5.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = current.title,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Black,
+                    color = TextWhite,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // +1 Nivel
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("⬆️", fontSize = 32.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "+1 NIVEL",
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Black,
+                        color = SuccessGreen
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // +puntos
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🪙", fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "+${current.rewardPoints} PUNTOS",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AmberAccent
+                    )
+                }
+
+                // Si hay varios, indicar cuántos quedan
+                if (queue.size > 1) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        "+${queue.size - 1} logro(s) más…",
+                        fontSize = 12.sp,
+                        color = TextMuted,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = {
+                        if (queue.size > 1) {
+                            queue = queue.drop(1)
+                        } else {
+                            onDismiss()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberAccent),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(
+                        if (queue.size > 1) "SIGUIENTE" else "¡GENIAL!",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+//fun scheduleAlarm(context: Context, alarm;
 fun scheduleAlarm(context: Context, alarm: AlarmItem) {
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     val intent = Intent(context, AlarmReceiver::class.java).apply {
