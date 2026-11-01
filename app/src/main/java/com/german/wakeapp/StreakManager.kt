@@ -16,12 +16,25 @@ class StreakManager(context: Context) {
         }
     }
 
+    // NUEVO: Comprueba si han pasado más de 24h para quitar la racha
+    fun checkStreakExpiration() {
+        val lastWake = prefs.getLong("LAST_WAKE_TIME", 0L)
+        val currentStreak = getStreak()
+        if (lastWake > 0 && currentStreak > 0) {
+            val now = System.currentTimeMillis()
+            if (now - lastWake > 24 * 60 * 60 * 1000L) {
+                prefs.edit().putInt("STREAK_KEY", 0).apply()
+            }
+        }
+    }
+
     fun registerSuccessfulWakeUp(): Int {
         val currentStreak = getStreak() + 1
         val currentPoints = getPoints() + 50
         prefs.edit()
             .putInt("STREAK_KEY", currentStreak)
             .putInt("POINTS_KEY", currentPoints)
+            .putLong("LAST_WAKE_TIME", System.currentTimeMillis())
             .apply()
         return currentStreak
     }
@@ -42,15 +55,15 @@ class StreakManager(context: Context) {
         } else false
     }
 
-    // ---------------- XP / NIVELES ----------------
+    // NUEVO: Gestión del tema de la tienda
+    fun isCyberpunkThemeUnlocked(): Boolean = prefs.getBoolean("theme_cyberpunk", false)
+    fun unlockCyberpunkTheme() {
+        prefs.edit().putBoolean("theme_cyberpunk", true).apply()
+    }
 
     fun getLevel(): Int = prefs.getInt("LEVEL_KEY", 1)
     fun getXp(): Int = prefs.getInt("XP_KEY", 0)
 
-    /**
-     * Sube niveles DIRECTAMENTE, sin tocar la XP acumulada.
-     * La barra exponencial se recalcula con `xpForLevel(newLevel)`.
-     */
     fun addLevels(amount: Int) {
         if (amount <= 0) return
         val newLevel = getLevel() + amount
@@ -77,8 +90,6 @@ class StreakManager(context: Context) {
             .apply()
         return levelsUp
     }
-
-    // ---------------- RECOMPENSA PENDIENTE ----------------
 
     fun setPendingReward(
         xp: Int,

@@ -1,5 +1,7 @@
 package com.german.wakeapp
 
+import android.media.MediaPlayer
+import android.content.res.Resources
 import androidx.compose.ui.res.painterResource
 import android.Manifest
 import android.app.AlarmManager
@@ -187,7 +189,8 @@ fun MainHeader(
     xp: Int,
     onInfoClick: () -> Unit,
     onAddPoints: () -> Unit,
-    onRewardsClick: () -> Unit
+    onRewardsClick: () -> Unit,
+    onWatchAd: () -> Unit
 ) {
     val animatedPoints by animateIntAsState(targetValue = points, label = "pts")
     val animatedStreak by animateIntAsState(targetValue = streak, label = "strk")
@@ -242,18 +245,30 @@ fun MainHeader(
                 )
             }
 
-            Button(
-                onClick = onAddPoints,
-                colors = ButtonDefaults.buttonColors(containerColor = AmberAccent),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                modifier = Modifier.height(32.dp)
-            ) {
-                Text(
-                    "+10⚡",
-                    color = Color.Black,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 11.sp
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = onAddPoints,
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberAccent),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text(
+                        "+10⚡",
+                        color = Color.Black,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 11.sp
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                // BOTÓN DE ANUNCIO FALSO
+                Button(
+                    onClick = onWatchAd,
+                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text("📺", color = Color.White, fontSize = 14.sp)
+                }
             }
         }
 
@@ -367,6 +382,7 @@ fun MainScreen() {
     val streakManager = remember { StreakManager(context) }
     val alarmRepository = remember { AlarmRepository(context) }
     val readingModeManager = remember { ReadingModeManager(context) }
+    val achievementManager = remember { AchievementManager(context) }
 
     var currentStreak by remember { mutableIntStateOf(streakManager.getStreak()) }
     var points by remember { mutableIntStateOf(streakManager.getPoints()) }
@@ -382,6 +398,7 @@ fun MainScreen() {
     var pendingSoundName by remember { mutableStateOf<String?>(null) }
     var currentSection by remember { mutableStateOf(AppSection.ALARMS) }
     var rewardDialog by remember { mutableStateOf<RewardInfo?>(null) }
+    var showAdDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         alarms.filter { it.isEnabled }.forEach { scheduleAlarm(context, it) }
@@ -396,12 +413,25 @@ fun MainScreen() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                // Revisar si la racha ha caducado por pasar 24h
+                streakManager.checkStreakExpiration()
+
                 currentStreak = streakManager.getStreak()
                 points = streakManager.getPoints()
                 currentLevel = streakManager.getLevel()
                 currentXp = streakManager.getXp()
 
-                // Recompensa pendiente (llegó estando en segundo plano / cerrada)
+                // Comprobar si hemos llegado a 10k puntos
+                achievementManager.checkPointsAchievement(points).let { newAch ->
+                    if (newAch.isNotEmpty()) {
+                        rewardDialog = RewardInfo(
+                            xpGained = 0, levelUp = false, oldLevel = currentLevel, newLevel = currentLevel,
+                            achievements = newAch.map { RewardAchievement(it.id, it.title, it.emoji, it.rewardPoints) },
+                            bonusLevels = 0, bonusPoints = newAch.sumOf { it.rewardPoints }
+                        )
+                    }
+                }
+
                 streakManager.consumePendingReward()?.let { data ->
                     rewardDialog = RewardInfo(
                         xpGained = data.xp,
@@ -467,7 +497,8 @@ fun MainScreen() {
                     onAddPoints = {
                         streakManager.addPoints(10)
                         points = streakManager.getPoints()
-                    }
+                    },
+                    onWatchAd = { showAdDialog = true }
                 )
             },
             bottomBar = {
@@ -528,20 +559,29 @@ fun MainScreen() {
                             level = currentLevel,
                             xp = currentXp
                         )
-                        AppSection.SHOP -> {
-                            // TODO: nueva tienda
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "Próximamente…",
-                                    color = TextMuted,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                        AppSection.SHOP -> ShopSection(
+                            points = points,
+                            streakManager = streakManager,
+                            onBuy = { cost ->
+                                if (streakManager.spendPoints(cost)) {
+                                    points = streakManager.getPoints()
+                                }
+                            },
+                            onAchievementUnlocked = {
+                                achievementManager.checkShopBuyer().let { newAch ->
+                                    if (newAch.isNotEmpty()) {
+                                        // Si compra, le damos el logro y le sumamos los puntos
+                                        streakManager.addPoints(newAch.sumOf { it.rewardPoints })
+                                        points = streakManager.getPoints()
+                                        rewardDialog = RewardInfo(
+                                            xpGained = 0, levelUp = false, oldLevel = currentLevel, newLevel = currentLevel,
+                                            achievements = newAch.map { RewardAchievement(it.id, it.title, it.emoji, it.rewardPoints) },
+                                            bonusLevels = 0, bonusPoints = newAch.sumOf { it.rewardPoints }
+                                        )
+                                    }
+                                }
                             }
-                        }
+                        )
                         AppSection.READING -> ReadingSection(manager = readingModeManager)
                     }
                 }
@@ -579,6 +619,25 @@ fun MainScreen() {
                     LevelRewardsDialog(onDismiss = { showRewardsDialog = false })
                 }
 
+                if (showAdDialog) {
+                    FakeAdDialog(
+                        onDismiss = { showAdDialog = false },
+                        onReward = {
+                            achievementManager.checkAdWatch().let { newAch ->
+                                if (newAch.isNotEmpty()) {
+                                    streakManager.addPoints(newAch.sumOf { it.rewardPoints })
+                                    points = streakManager.getPoints()
+                                    rewardDialog = RewardInfo(
+                                        xpGained = 0, levelUp = false, oldLevel = currentLevel, newLevel = currentLevel,
+                                        achievements = newAch.map { RewardAchievement(it.id, it.title, it.emoji, it.rewardPoints) },
+                                        bonusLevels = 0, bonusPoints = newAch.sumOf { it.rewardPoints }
+                                    )
+                                }
+                            }
+                        }
+                    )
+                }
+
                 rewardDialog?.let { info ->
                     if (info.achievements.isNotEmpty()) {
                         AchievementUnlockedOverlay(
@@ -599,6 +658,36 @@ fun MainScreen() {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun FakeAdDialog(onDismiss: () -> Unit, onReward: () -> Unit) {
+    var secondsLeft by remember { mutableIntStateOf(3) }
+
+    LaunchedEffect(Unit) {
+        while (secondsLeft > 0) {
+            delay(1000)
+            secondsLeft--
+        }
+        onReward()
+        onDismiss()
+    }
+
+    Dialog(onDismissRequest = { /* Bloqueado */ }) {
+        Box(
+            modifier = Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF1E1E1E)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("ANUNCIO", color = Color.Gray, fontSize = 12.sp, letterSpacing = 2.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("📺", fontSize = 64.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Espera $secondsLeft segundos...", color = TextWhite, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -964,7 +1053,8 @@ fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Uni
 @Composable
 fun ProgressSection(context: Context, streak: Int, points: Int, level: Int, xp: Int) {
     val achievementManager = remember { AchievementManager(context) }
-    val unlockedCount = remember { achievementManager.unlockedCount() }
+    // Al quitarle el 'remember', forzamos a que se recalcule cada vez que se dibuja la pantalla
+    val unlockedCount = achievementManager.unlockedCount()
     val xpNeeded = StreakManager.xpForLevel(level)
 
     Column(
@@ -1010,7 +1100,7 @@ fun ProgressSection(context: Context, streak: Int, points: Int, level: Int, xp: 
 
         AchievementCatalog.all.forEach { ach ->
             val unlocked = achievementManager.isUnlocked(ach.id)
-            val progress = achievementManager.getProgress(ach, streak)
+            val progress = achievementManager.getProgress(ach, streak, points)
             AchievementRow(ach, unlocked, progress)
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -1096,7 +1186,6 @@ fun AchievementRow(achievement: Achievement, unlocked: Boolean, progress: Int) {
         Text(if (unlocked) "✓" else "🔒", fontSize = 16.sp)
     }
 }
-
 
 @Composable
 fun ReadingSection(manager: ReadingModeManager) {
@@ -1303,12 +1392,25 @@ fun NumberPicker(value: Int, range: IntRange, step: Int = 1, onValueChange: (Int
     }
 }
 
-
 @Composable
 fun AchievementUnlockedOverlay(
     info: RewardInfo,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+
+    // REPRODUCIR SONIDO AL MOSTRAR EL LOGRO
+    LaunchedEffect(Unit) {
+        try {
+            val resId = context.resources.getIdentifier("achievement_se", "raw", context.packageName)
+            if (resId != 0) {
+                val mediaPlayer = MediaPlayer.create(context, resId)
+                mediaPlayer.start()
+                mediaPlayer.setOnCompletionListener { it.release() }
+            }
+        } catch (_: Exception) {}
+    }
+
     // Cola de logros: mostramos uno detrás de otro
     var queue by remember { mutableStateOf(info.achievements.toList()) }
     val current = queue.firstOrNull()
@@ -1442,7 +1544,6 @@ fun AchievementUnlockedOverlay(
     }
 }
 
-//fun scheduleAlarm(context: Context, alarm;
 fun scheduleAlarm(context: Context, alarm: AlarmItem) {
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     val intent = Intent(context, AlarmReceiver::class.java).apply {
@@ -1476,4 +1577,85 @@ fun cancelAlarm(context: Context, alarm: AlarmItem) {
     val intent = Intent(context, AlarmReceiver::class.java)
     val pendingIntent = PendingIntent.getBroadcast(context, alarm.id.toInt(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     alarmManager.cancel(pendingIntent)
+}
+
+@Composable
+fun ShopSection(
+    points: Int,
+    streakManager: StreakManager,
+    onBuy: (Int) -> Unit,
+    onAchievementUnlocked: () -> Unit
+) {
+    val context = LocalContext.current
+    var hasTheme by remember { mutableStateOf(streakManager.isCyberpunkThemeUnlocked()) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("SUMINISTROS", fontSize = 24.sp, fontWeight = FontWeight.Black, color = AmberAccent, letterSpacing = 2.sp)
+                Text("Mejoras y ventajas", fontSize = 12.sp, color = TextMuted)
+            }
+            Box(
+                modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                    .background(Brush.horizontalGradient(listOf(CardBackground, SurfaceDark)))
+                    .border(1.5.dp, RedAccent, RoundedCornerShape(16.dp))
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🪙", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("$points", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = TextWhite)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        val canAfford = points >= 150
+        val borderColor = when {
+            hasTheme -> SuccessGreen
+            canAfford -> RedAccent
+            else -> CardBorder
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(20.dp)).border(1.5.dp, borderColor, RoundedCornerShape(20.dp)),
+            colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = 0.8f)),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Row(modifier = Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(52.dp).clip(CircleShape).background(SurfaceDark), contentAlignment = Alignment.Center) {
+                        Text("👑", fontSize = 26.sp)
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text("Tema Matrix", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextWhite)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("Interfaz oscura verde/cian de bajo consumo.", fontSize = 12.sp, color = TextMuted, lineHeight = 16.sp)
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Button(
+                    enabled = !hasTheme && canAfford,
+                    onClick = {
+                        if (!hasTheme) {
+                            streakManager.unlockCyberpunkTheme()
+                            hasTheme = true
+                            onBuy(150)
+                            onAchievementUnlocked()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (hasTheme) SuccessGreen.copy(alpha = 0.2f) else RedPrimary,
+                        disabledContainerColor = SurfaceDark
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Text(if (hasTheme) "EQUIPADO" else "150 🪙", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = if (hasTheme) SuccessGreen else TextWhite)
+                }
+            }
+        }
+    }
 }

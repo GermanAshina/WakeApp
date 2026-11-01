@@ -120,7 +120,7 @@ class ChallengeActivity : ComponentActivity() {
 
         val levelBefore = streakManager.getLevel()
 
-        // 1) Registrar despertar (sube racha +50 puntos base)
+        // 1) Registrar despertar
         val newStreak = streakManager.registerSuccessfulWakeUp()
 
         // 2) XP según dificultad
@@ -133,10 +133,19 @@ class ChallengeActivity : ComponentActivity() {
         }
         val levelsUpByXp = streakManager.addXp(xpGained)
 
-        // 3) Comprobar logros contra la racha NUEVA
-        val newlyUnlocked = achievementManager.checkStreakAchievements(newStreak)
+        // 3) Comprobar logros
+        val newlyUnlocked = mutableListOf<Achievement>()
+        newlyUnlocked.addAll(achievementManager.checkStreakAchievements(newStreak))
 
-        // 4) Por cada logro: +1 nivel limpio y +rewardPoints puntos
+        // NUEVO: Comprobar si es antes de las 7:00
+        val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        newlyUnlocked.addAll(achievementManager.checkEarlyBird(currentHour))
+
+        // NUEVO: Contar uso de minijuegos (leyendo el tipo desde el Intent)
+        val currentChallengeType = intent.getStringExtra("CHALLENGE_TYPE") ?: "MATH"
+        newlyUnlocked.addAll(achievementManager.checkChallengeAchievements(currentChallengeType))
+
+        // 4) Recompensas
         val bonusLevels = newlyUnlocked.size
         val bonusPoints = newlyUnlocked.sumOf { it.rewardPoints }
         if (bonusLevels > 0) streakManager.addLevels(bonusLevels)
@@ -144,7 +153,7 @@ class ChallengeActivity : ComponentActivity() {
 
         val levelAfter = streakManager.getLevel()
 
-        // 5) Serializar logros para la recompensa pendiente
+        // 5) Serializar logros
         val achievementsJson = if (newlyUnlocked.isEmpty()) null else {
             val arr = org.json.JSONArray()
             newlyUnlocked.forEach { ach ->
@@ -160,7 +169,7 @@ class ChallengeActivity : ComponentActivity() {
             arr.toString()
         }
 
-        // 6) Guardar recompensa pendiente (para MainActivity)
+        // 6) Guardar recompensa
         streakManager.setPendingReward(
             xp = xpGained,
             levelUp = (levelsUpByXp > 0 || bonusLevels > 0),
