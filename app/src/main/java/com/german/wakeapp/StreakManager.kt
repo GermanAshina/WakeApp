@@ -16,8 +16,41 @@ class StreakManager(context: Context) {
         }
     }
 
-    // NUEVO: Comprueba si han pasado más de 24h para quitar la racha
+    // Inventario de la tienda
+    fun getInventoryCount(item: String): Int = prefs.getInt("inv_$item", 0)
+    fun addInventoryItem(item: String, amount: Int = 1) {
+        val current = getInventoryCount(item)
+        prefs.edit().putInt("inv_$item", current + amount).apply()
+    }
+    fun consumeInventoryItem(item: String): Boolean {
+        val current = getInventoryCount(item)
+        if (current > 0) {
+            prefs.edit().putInt("inv_$item", current - 1).apply()
+            return true
+        }
+        return false
+    }
+
+    // Racha Congelada
+    fun isStreakFrozen(): Boolean {
+        val frozenUntil = prefs.getLong("FROZEN_UNTIL", 0L)
+        return System.currentTimeMillis() < frozenUntil
+    }
+
+    fun getFreezeRemainingMillis(): Long {
+        val frozenUntil = prefs.getLong("FROZEN_UNTIL", 0L)
+        val remaining = frozenUntil - System.currentTimeMillis()
+        return if (remaining > 0) remaining else 0L
+    }
+
+    fun freezeStreakFor24h() {
+        val until = System.currentTimeMillis() + (24 * 60 * 60 * 1000L)
+        prefs.edit().putLong("FROZEN_UNTIL", until).apply()
+    }
+
     fun checkStreakExpiration() {
+        if (isStreakFrozen()) return
+
         val lastWake = prefs.getLong("LAST_WAKE_TIME", 0L)
         val currentStreak = getStreak()
         if (lastWake > 0 && currentStreak > 0) {
@@ -55,7 +88,6 @@ class StreakManager(context: Context) {
         } else false
     }
 
-    // NUEVO: Gestión del tema de la tienda
     fun isCyberpunkThemeUnlocked(): Boolean = prefs.getBoolean("theme_cyberpunk", false)
     fun unlockCyberpunkTheme() {
         prefs.edit().putBoolean("theme_cyberpunk", true).apply()
