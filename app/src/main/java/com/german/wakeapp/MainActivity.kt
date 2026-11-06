@@ -1,8 +1,9 @@
 package com.german.wakeapp
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.runtime.snapshotFlow
 import android.media.MediaPlayer
-import android.content.res.Resources
-import androidx.compose.ui.res.painterResource
 import android.Manifest
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -39,12 +40,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,6 +64,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.german.wakeapp.ui.theme.*
 import kotlinx.coroutines.delay
 import java.util.Calendar
+
+// --- PALETA CLÍNICA ---
+val CleanBg = Color(0xFF0A0A0A)
+val CleanSurface = Color(0xFF1A1A1A)
+val CleanSurfaceVariant = Color(0xFF262626)
+val CleanText = Color(0xFFFFFFFF)
+val CleanTextDim = Color(0xFF888888)
+val WakeBlue = Color(0xFF1D9BF0)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,7 +97,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             WakeAppTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = DarkBackground) {
+                Surface(modifier = Modifier.fillMaxSize(), color = CleanBg) {
                     MainScreen()
                 }
             }
@@ -96,8 +112,11 @@ data class AlarmItem(
     var isEnabled: Boolean = true,
     val challengeType: String = "MATH",
     val difficulty: String = "MEDIUM",
+    val rounds: Int = 1,
+    val xpBoost: Boolean = false,
     val soundUri: String? = null,
-    val soundName: String? = null
+    val soundName: String? = null,
+    val colorHex: String = "DEFAULT"
 )
 
 data class RewardInfo(
@@ -110,21 +129,12 @@ data class RewardInfo(
     val bonusPoints: Int = 0
 )
 
-fun challengeAccent(type: String): Color = when (type) {
-    "MATH" -> RedAccent
-    "TEXT" -> AmberAccent
-    "TRACING" -> SuccessGreen
-    "STROOP" -> Color(0xFFD14545)
-    "SHAKE" -> Color(0xFFE08E3C)
-    else -> RedPrimary
-}
+fun challengeAccent(type: String): Color = CleanText
 
 fun challengeEmoji(type: String): String = when (type) {
     "MATH" -> "∑"
     "TEXT" -> "✎"
     "TRACING" -> "⌖"
-    "STROOP" -> "🎨"
-    "SHAKE" -> "📳"
     else -> "⏰"
 }
 
@@ -132,9 +142,21 @@ fun challengeTitle(type: String): String = when (type) {
     "MATH" -> "Matemáticas"
     "TEXT" -> "Frase Exacta"
     "TRACING" -> "Delineado"
-    "STROOP" -> "Colores"
-    "SHAKE" -> "Sacudida"
     else -> "Desafío"
+}
+
+fun getAlarmColor(colorHex: String, defaultAccent: Color): Color {
+    return when (colorHex) {
+        "RED" -> Color(0xFFFF5252)
+        "BLUE" -> WakeBlue
+        "GREEN" -> Color(0xFF00E676)
+        "PURPLE" -> Color(0xFFE040FB)
+        "ORANGE" -> Color(0xFFFF9800)
+        "YELLOW" -> Color(0xFFFFEB3B)
+        "PINK" -> Color(0xFFFF4081)
+        "CYAN" -> Color(0xFF00E5FF)
+        else -> WakeBlue
+    }
 }
 
 private fun queryDisplayName(context: Context, uri: Uri): String {
@@ -154,26 +176,11 @@ enum class AppSection(val label: String, val emoji: String) {
     ALARMS("Alarmas", "⏰"),
     PROGRESS("Progreso", "📊"),
     SHOP("Tienda", "🛒"),
-    WORLD_CLOCK("Mundo", "🌍")
+    SETTINGS("Ajustes", "⚙️")
 }
 
 @Composable
 fun AnimatedBackground() {
-    val context = LocalContext.current
-    val streakManager = remember { StreakManager(context) }
-    var themeActive by remember { mutableStateOf(streakManager.isCyberpunkThemeUnlocked()) }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                themeActive = streakManager.isCyberpunkThemeUnlocked()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val backgroundRes = when {
         hour in 6..17 -> R.drawable.fondo_base_dia
@@ -189,19 +196,7 @@ fun AnimatedBackground() {
             contentScale = ContentScale.Crop
         )
 
-        if (themeActive) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF001100).copy(alpha = 0.85f))
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f))
-            )
-        }
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
     }
 }
 
@@ -213,18 +208,15 @@ fun MainHeader(
     xp: Int,
     isFrozen: Boolean,
     freezeRemainingMillis: Long,
+    readingMode: Boolean,
+    onToggleReading: () -> Unit,
     onInfoClick: () -> Unit,
-    onAddPoints: () -> Unit,
     onRewardsClick: () -> Unit,
-    onWatchAd: () -> Unit,
-    onFreezeClick: () -> Unit
+    onStreakClick: () -> Unit,
+    onSettingsClick: () -> Unit
 ) {
-    val animatedPoints by animateIntAsState(targetValue = points, label = "pts")
-    val animatedStreak by animateIntAsState(targetValue = streak, label = "strk")
-    val animatedXp by animateIntAsState(targetValue = xp, label = "xp")
-
     val xpNeeded = StreakManager.xpForLevel(level)
-    val xpProgress = (animatedXp.toFloat() / xpNeeded).coerceIn(0f, 1f)
+    val xpProgress = (xp.toFloat() / xpNeeded).coerceIn(0f, 1f)
 
     val hours = (freezeRemainingMillis / (1000 * 60 * 60)) % 24
     val minutes = (freezeRemainingMillis / (1000 * 60)) % 60
@@ -233,200 +225,104 @@ fun MainHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(DarkBackground.copy(alpha = 0.85f))
+            .background(CleanBg.copy(alpha = 0.85f))
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
-        // Fila del Logo y botones
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceDark)
-                    .border(1.5.dp, RedAccent, CircleShape)
-                    .clickable { onInfoClick() },
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.img_icon_info),
-                    contentDescription = "Información",
-                    modifier = Modifier.size(30.dp).clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text("WakeApp", fontWeight = FontWeight.Black, fontSize = 22.sp, color = TextWhite, letterSpacing = (-0.5).sp)
-                Text("Nivel $level", fontSize = 11.sp, color = AmberAccent, fontWeight = FontWeight.Bold)
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Button(
-                    onClick = onAddPoints,
-                    colors = ButtonDefaults.buttonColors(containerColor = AmberAccent),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Text("+10⚡", color = Color.Black, fontWeight = FontWeight.ExtraBold, fontSize = 11.sp)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = onWatchAd,
-                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Text("📺", color = Color.White, fontSize = 14.sp)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Fila de XP
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(AmberAccent.copy(alpha = 0.15f))
-                    .border(1.5.dp, AmberAccent, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("$level", fontSize = 13.sp, fontWeight = FontWeight.Black, color = AmberAccent)
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                LinearProgressIndicator(
-                    progress = { xpProgress },
-                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
-                    color = AmberAccent,
-                    trackColor = SurfaceDark
-                )
-                Spacer(modifier = Modifier.height(3.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("XP", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(16.dp)
-                                .clip(CircleShape)
-                                .background(AmberAccent.copy(alpha = 0.2f))
-                                .clickable { onRewardsClick() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("🎁", fontSize = 10.sp)
-                        }
-                    }
-                    Text("$animatedXp / $xpNeeded", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Fila de Píldoras (Racha y Puntos)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Píldora de racha CON TIEMPO
-            Row(
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
-                    .background(if (isFrozen) Color(0xFF00E5FF).copy(alpha = 0.15f) else SurfaceDark.copy(alpha = 0.7f))
-                    .border(1.dp, if (isFrozen) Color(0xFF00E5FF) else Color(0xFFE08E3C).copy(alpha = 0.3f), RoundedCornerShape(14.dp))
-                    .clickable { onFreezeClick() }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(modifier = Modifier.size(28.dp).clip(CircleShape).background(if (isFrozen) Color(0xFF00E5FF).copy(alpha = 0.2f) else Color(0xFFE08E3C).copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
-                    Text(if (isFrozen) "🧊" else "🔥", fontSize = 14.sp)
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(
-                        if (isFrozen) "Congelada" else "$animatedStreak días",
-                        fontWeight = FontWeight.Bold,
-                        color = if (isFrozen) Color(0xFF00E5FF) else TextWhite,
-                        fontSize = 13.sp
-                    )
-                    if (isFrozen) {
-                        Text(
-                            "Quedan $timeText",
-                            fontSize = 9.sp,
-                            color = Color(0xFF00E5FF).copy(alpha = 0.8f),
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-
-            // Píldora de puntos CON MONEDA
-            Row(
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
-                    .background(SurfaceDark.copy(alpha = 0.7f))
-                    .border(1.dp, AmberAccent.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onInfoClick() }) {
                 Box(
-                    modifier = Modifier.size(28.dp).clip(CircleShape).background(AmberAccent.copy(alpha = 0.15f)),
+                    modifier = Modifier.size(40.dp).clip(CircleShape).background(CleanSurface),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🪙", fontSize = 14.sp)
+                    Image(
+                        painter = painterResource(id = R.drawable.img_icon_info),
+                        contentDescription = "Información",
+                        modifier = Modifier.size(24.dp).clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
                 }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    "$animatedPoints pts",
-                    fontWeight = FontWeight.Bold,
-                    color = TextWhite,
-                    fontSize = 13.sp
-                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("WakeApp", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = CleanText)
+            }
+
+            // BOTÓN DE MODO LECTURA CON LUNA VECTORIAL
+            Box(
+                modifier = Modifier.size(40.dp).clip(CircleShape).background(if (readingMode) WakeBlue else CleanSurface).clickable { onToggleReading() },
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.size(18.dp)) {
+                    val w = size.width; val h = size.height
+                    val path = Path().apply {
+                        moveTo(w * 0.8f, h * 0.1f)
+                        cubicTo(w * 0.2f, h * 0.1f, w * 0.1f, h * 0.9f, w * 0.8f, h * 0.9f)
+                        cubicTo(w * 0.3f, h * 0.9f, w * 0.3f, h * 0.1f, w * 0.8f, h * 0.1f)
+                    }
+                    drawPath(path, color = CleanText, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                }
             }
         }
-    }
-}
 
-@Composable
-fun StatPill(icon: String, label: String, accent: Color, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(SurfaceDark.copy(alpha = 0.7f))
-            .border(1.dp, accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(accent.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(icon, fontSize = 14.sp)
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+
+            // BOTÓN DE CALENDARIO ("CALENDARIO")
+            Row(
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(CleanSurface.copy(alpha = 0.9f)).clickable { onStreakClick() }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Canvas(modifier = Modifier.size(24.dp)) {
+                    val w = size.width; val h = size.height; val s = 1.5.dp.toPx()
+                    drawRoundRect(color = CleanText, topLeft = Offset(w*0.1f, h*0.2f), size = Size(w*0.8f, h*0.75f), cornerRadius = CornerRadius(4.dp.toPx()), style = Stroke(width = s))
+                    drawLine(color = CleanText, start = Offset(w*0.1f, h*0.4f), end = Offset(w*0.9f, h*0.4f), strokeWidth = s)
+                    drawLine(color = CleanText, start = Offset(w*0.3f, h*0.1f), end = Offset(w*0.3f, h*0.3f), strokeWidth = s, cap = StrokeCap.Round)
+                    drawLine(color = CleanText, start = Offset(w*0.7f, h*0.1f), end = Offset(w*0.7f, h*0.3f), strokeWidth = s, cap = StrokeCap.Round)
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text("Calendario", fontWeight = FontWeight.Bold, color = CleanText, fontSize = 15.sp)
+                    if (isFrozen) {
+                        Text("Congelada ($timeText)", fontWeight = FontWeight.SemiBold, color = WakeBlue, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            // BLOQUE DE PUNTOS
+            Row(
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(CleanSurface.copy(alpha = 0.9f)).padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Canvas(modifier = Modifier.size(24.dp)) {
+                    val w = size.width; val h = size.height; val s = 1.5.dp.toPx()
+                    drawCircle(color = CleanText, radius = w*0.4f, style = Stroke(width = s))
+                    drawLine(color = CleanText, start = Offset(w*0.5f, h*0.25f), end = Offset(w*0.5f, h*0.75f), strokeWidth = s, cap = StrokeCap.Round)
+                    drawLine(color = CleanText, start = Offset(w*0.4f, h*0.4f), end = Offset(w*0.6f, h*0.4f), strokeWidth = s, cap = StrokeCap.Round)
+                    drawLine(color = CleanText, start = Offset(w*0.4f, h*0.6f), end = Offset(w*0.6f, h*0.6f), strokeWidth = s, cap = StrokeCap.Round)
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("$points", fontWeight = FontWeight.Bold, color = CleanText, fontSize = 18.sp)
+            }
         }
-        Spacer(modifier = Modifier.width(10.dp))
-        Text(
-            label,
-            fontWeight = FontWeight.Bold,
-            color = TextWhite,
-            fontSize = 13.sp
-        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Nivel $level", fontSize = 12.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.width(12.dp))
+            LinearProgressIndicator(
+                progress = { xpProgress },
+                modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)),
+                color = CleanText,
+                trackColor = CleanSurfaceVariant
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Box(modifier = Modifier.clickable { onRewardsClick() }) { Text("Recompensas", fontSize = 12.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold) }
+        }
     }
 }
 
@@ -436,22 +332,39 @@ fun MainScreen() {
     val streakManager = remember { StreakManager(context) }
     val alarmRepository = remember { AlarmRepository(context) }
     val achievementManager = remember { AchievementManager(context) }
+    val readingModeManager = remember { ReadingModeManager(context) }
+    val settingsManager = remember { SettingsManager(context) }
 
     var currentStreak by remember { mutableIntStateOf(streakManager.getStreak()) }
     var points by remember { mutableIntStateOf(streakManager.getPoints()) }
     var currentLevel by remember { mutableIntStateOf(streakManager.getLevel()) }
     var currentXp by remember { mutableIntStateOf(streakManager.getXp()) }
     var alarms by remember { mutableStateOf(alarmRepository.loadAll()) }
+
     var showTimePicker by remember { mutableStateOf(false) }
+    var editingAlarm by remember { mutableStateOf<AlarmItem?>(null) }
     var showInfoDialog by remember { mutableStateOf(false) }
     var showRewardsDialog by remember { mutableStateOf(false) }
+    var showStreakCalendar by remember { mutableStateOf(false) }
+
+    // Alerta de límite de alarmas
+    var showAlarmLimitDialog by remember { mutableStateOf(false) }
+
     var selectedChallengeType by remember { mutableStateOf("MATH") }
     var selectedDifficulty by remember { mutableStateOf("MEDIUM") }
+    var selectedRounds by remember { mutableIntStateOf(1) }
+    var selectedColor by remember { mutableStateOf("DEFAULT") }
     var pendingSoundUri by remember { mutableStateOf<String?>(null) }
     var pendingSoundName by remember { mutableStateOf<String?>(null) }
+
     var currentSection by remember { mutableStateOf(AppSection.ALARMS) }
     var rewardDialog by remember { mutableStateOf<RewardInfo?>(null) }
-    var showAdDialog by remember { mutableStateOf(false) }
+    var readingMode by remember { mutableStateOf(readingModeManager.isEnabled()) }
+
+    val activity = context as? android.app.Activity
+    LaunchedEffect(readingMode, activity) {
+        activity?.window?.let { readingModeManager.applyToWindow(it, readingMode) }
+    }
 
     var isFrozen by remember { mutableStateOf(streakManager.isStreakFrozen()) }
     var freezeInventory by remember { mutableIntStateOf(streakManager.getInventoryCount("freeze")) }
@@ -476,10 +389,38 @@ fun MainScreen() {
         }
     }
 
+    LaunchedEffect(Unit) {
+        AlarmStateHolder.restoreIfNeeded(context)
+        if (AlarmStateHolder.isRinging) {
+            val intent = Intent(context, ChallengeActivity::class.java).apply {
+                putExtra("CHALLENGE_TYPE", AlarmStateHolder.lastChallengeType)
+                putExtra("DIFFICULTY", AlarmStateHolder.lastDifficulty)
+                putExtra("ROUNDS", AlarmStateHolder.lastRounds)
+                putExtra("XP_BOOST", AlarmStateHolder.lastXpBoost)
+                putExtra("FROM_SERVICE", true)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            context.startActivity(intent)
+        }
+    }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                AlarmStateHolder.restoreIfNeeded(context)
+                if (AlarmStateHolder.isRinging) {
+                    val intent = Intent(context, ChallengeActivity::class.java).apply {
+                        putExtra("CHALLENGE_TYPE", AlarmStateHolder.lastChallengeType)
+                        putExtra("DIFFICULTY", AlarmStateHolder.lastDifficulty)
+                        putExtra("ROUNDS", AlarmStateHolder.lastRounds)
+                        putExtra("XP_BOOST", AlarmStateHolder.lastXpBoost)
+                        putExtra("FROM_SERVICE", true)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    }
+                    context.startActivity(intent)
+                }
+
                 streakManager.checkStreakExpiration()
                 currentStreak = streakManager.getStreak()
                 points = streakManager.getPoints()
@@ -487,6 +428,7 @@ fun MainScreen() {
                 currentXp = streakManager.getXp()
                 isFrozen = streakManager.isStreakFrozen()
                 freezeInventory = streakManager.getInventoryCount("freeze")
+                readingMode = readingModeManager.isEnabled()
 
                 achievementManager.checkPointsAchievement(points).let { newAch ->
                     if (newAch.isNotEmpty()) {
@@ -522,25 +464,10 @@ fun MainScreen() {
         }
     }
 
-    val infinite = rememberInfiniteTransition(label = "fab")
-    val fabScale by infinite.animateFloat(
-        initialValue = 1f, targetValue = 1.06f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "fabScale"
-    )
-    val ringScale by infinite.animateFloat(
-        initialValue = 1f, targetValue = 1.55f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Restart),
-        label = "ringScale"
-    )
-    val ringAlpha by infinite.animateFloat(
-        initialValue = 0.55f, targetValue = 0f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Restart),
-        label = "ringAlpha"
-    )
-
-    Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
-        AnimatedBackground()
+    Box(modifier = Modifier.fillMaxSize().background(CleanBg)) {
+        if (currentSection != AppSection.SETTINGS) {
+            AnimatedBackground()
+        }
 
         Scaffold(
             containerColor = Color.Transparent,
@@ -548,41 +475,48 @@ fun MainScreen() {
                 MainHeader(
                     streak = currentStreak, points = points, level = currentLevel, xp = currentXp, isFrozen = isFrozen,
                     freezeRemainingMillis = freezeRemaining,
+                    readingMode = readingMode,
+                    onToggleReading = {
+                        readingMode = !readingMode
+                        readingModeManager.setEnabled(readingMode)
+                    },
                     onInfoClick = { showInfoDialog = true },
                     onRewardsClick = { showRewardsDialog = true },
-                    onAddPoints = { streakManager.addPoints(10); points = streakManager.getPoints() },
-                    onWatchAd = { showAdDialog = true },
-                    onFreezeClick = {
-                        if (!isFrozen && freezeInventory > 0) {
-                            if (streakManager.consumeInventoryItem("freeze")) {
-                                streakManager.freezeStreakFor24h()
-                                isFrozen = true
-                                freezeInventory = streakManager.getInventoryCount("freeze")
-                            }
-                        }
-                    }
+                    onStreakClick = { showStreakCalendar = true },
+                    onSettingsClick = { currentSection = AppSection.SETTINGS }
                 )
             },
             bottomBar = { WakeBottomBar(current = currentSection, onSelect = { currentSection = it }) },
             floatingActionButton = {
                 if (currentSection == AppSection.ALARMS) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Box(modifier = Modifier.size(56.dp).scale(ringScale).clip(CircleShape).background(RedAccent.copy(alpha = ringAlpha)))
-                        FloatingActionButton(
-                            onClick = { pendingSoundUri = null; pendingSoundName = null; showTimePicker = true },
-                            containerColor = RedPrimary, contentColor = TextWhite, shape = CircleShape,
-                            modifier = Modifier.scale(fabScale).shadow(20.dp, CircleShape, ambientColor = RedAccent, spotColor = RedAccent)
-                        ) {
-                            Text("+", fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                        }
+                    FloatingActionButton(
+                        onClick = {
+                            // LÍMITE DE 4 ALARMAS
+                            if (alarms.size >= 4 && !streakManager.hasInfiniteAlarms()) {
+                                showAlarmLimitDialog = true
+                            } else {
+                                pendingSoundUri = null
+                                pendingSoundName = null
+                                selectedRounds = 1
+                                selectedColor = "DEFAULT"
+                                showTimePicker = true
+                            }
+                        },
+                        containerColor = WakeBlue,
+                        contentColor = CleanText,
+                        shape = CircleShape,
+                        modifier = Modifier.size(64.dp)
+                    ) {
+                        Text("+", fontSize = 32.sp, fontWeight = FontWeight.Light)
                     }
                 }
-            }
+            },
+            floatingActionButtonPosition = FabPosition.Start
         ) { paddingValues ->
             Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
                 AnimatedContent(
                     targetState = currentSection,
-                    transitionSpec = { fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300)) },
+                    transitionSpec = { fadeIn(animationSpec = tween(200)) togetherWith fadeOut(animationSpec = tween(200)) },
                     label = "section_transition"
                 ) { section ->
                     when (section) {
@@ -595,28 +529,22 @@ fun MainScreen() {
                             onDelete = { alarm ->
                                 cancelAlarm(context, alarm)
                                 alarms = alarms.filter { it.id != alarm.id }
-                            }
+                            },
+                            onEdit = { editingAlarm = it }
                         )
-                        AppSection.PROGRESS -> ProgressSection(context = context, streak = currentStreak, points = points, level = currentLevel, xp = currentXp)
+                        AppSection.PROGRESS -> ProgressSection(
+                            context = context, streak = currentStreak, points = points,
+                            level = currentLevel, xp = currentXp
+                        )
                         AppSection.SHOP -> ShopSection(
                             points = points,
                             streakManager = streakManager,
-                            onBuy = { cost -> if (streakManager.spendPoints(cost)) { points = streakManager.getPoints() } },
-                            onAchievementUnlocked = {
-                                achievementManager.checkShopBuyer().let { newAch ->
-                                    if (newAch.isNotEmpty()) {
-                                        streakManager.addPoints(newAch.sumOf { it.rewardPoints })
-                                        points = streakManager.getPoints()
-                                        rewardDialog = RewardInfo(
-                                            xpGained = 0, levelUp = false, oldLevel = currentLevel, newLevel = currentLevel,
-                                            achievements = newAch.map { RewardAchievement(it.id, it.title, it.emoji, it.rewardPoints) },
-                                            bonusLevels = 0, bonusPoints = newAch.sumOf { it.rewardPoints }
-                                        )
-                                    }
-                                }
-                            }
+                            onBuy = { cost -> if (streakManager.spendPoints(cost)) { points = streakManager.getPoints() } }
                         )
-                        AppSection.WORLD_CLOCK -> WorldClockSection()
+                        AppSection.SETTINGS -> SettingsSection(
+                            streakManager = streakManager,
+                            settingsManager = settingsManager
+                        )
                     }
                 }
 
@@ -627,37 +555,75 @@ fun MainScreen() {
                             val newAlarm = AlarmItem(
                                 hour = hour, minute = minute, isEnabled = true,
                                 challengeType = selectedChallengeType, difficulty = selectedDifficulty,
-                                soundUri = pendingSoundUri, soundName = pendingSoundName
+                                rounds = selectedRounds,
+                                soundUri = pendingSoundUri, soundName = pendingSoundName,
+                                colorHex = selectedColor
                             )
-                            alarms = alarms + newAlarm
+                            alarms = (alarms + newAlarm).sortedBy { it.hour * 60 + it.minute }
                             scheduleAlarm(context, newAlarm)
                             showTimePicker = false; pendingSoundUri = null; pendingSoundName = null
                         },
-                        selectedChallengeType = selectedChallengeType, onChallengeTypeSelected = { selectedChallengeType = it },
+                        selectedChallengeType = selectedChallengeType, onChallengeTypeSelected = {
+                            selectedChallengeType = it
+                            selectedRounds = 1
+                        },
                         selectedDifficulty = selectedDifficulty, onDifficultySelected = { selectedDifficulty = it },
+                        selectedRounds = selectedRounds, onRoundsChange = { selectedRounds = it },
                         soundName = pendingSoundName,
                         onPickSound = { soundPickerLauncher.launch(arrayOf("audio/*")) },
-                        onClearSound = { pendingSoundUri = null; pendingSoundName = null }
+                        onClearSound = { pendingSoundUri = null; pendingSoundName = null },
+                        selectedColor = selectedColor, onColorSelected = { selectedColor = it },
+                        streakManager = streakManager
+                    )
+                }
+
+                editingAlarm?.let { alarmToEdit ->
+                    EditAlarmDialog(
+                        alarm = alarmToEdit,
+                        onDismiss = { editingAlarm = null },
+                        onSave = { updatedAlarm ->
+                            alarms = alarms.map { if (it.id == updatedAlarm.id) updatedAlarm else it }.sortedBy { it.hour * 60 + it.minute }
+                            cancelAlarm(context, alarmToEdit)
+                            if (updatedAlarm.isEnabled) scheduleAlarm(context, updatedAlarm)
+                            editingAlarm = null
+                        },
+                        onDelete = {
+                            cancelAlarm(context, alarmToEdit)
+                            alarms = alarms.filter { it.id != alarmToEdit.id }
+                            editingAlarm = null
+                        },
+                        streakManager = streakManager
                     )
                 }
 
                 if (showInfoDialog) InfoDialog(onDismiss = { showInfoDialog = false })
                 if (showRewardsDialog) LevelRewardsDialog(onDismiss = { showRewardsDialog = false })
 
-                if (showAdDialog) {
-                    FakeAdDialog(
-                        onDismiss = { showAdDialog = false },
-                        onReward = {
-                            achievementManager.checkAdWatch().let { newAch ->
-                                if (newAch.isNotEmpty()) {
-                                    streakManager.addPoints(newAch.sumOf { it.rewardPoints })
-                                    points = streakManager.getPoints()
-                                    rewardDialog = RewardInfo(
-                                        xpGained = 0, levelUp = false, oldLevel = currentLevel, newLevel = currentLevel,
-                                        achievements = newAch.map { RewardAchievement(it.id, it.title, it.emoji, it.rewardPoints) },
-                                        bonusLevels = 0, bonusPoints = newAch.sumOf { it.rewardPoints }
-                                    )
-                                }
+                if (showStreakCalendar) {
+                    StreakCalendarDialog(streak = currentStreak, onDismiss = { showStreakCalendar = false })
+                }
+
+                // Alert Dialog del límite
+                if (showAlarmLimitDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showAlarmLimitDialog = false },
+                        containerColor = CleanSurface,
+                        title = { Text("Límite alcanzado", color = CleanText, fontWeight = FontWeight.Bold) },
+                        text = { Text("Has alcanzado el límite de 4 alarmas. Ve a la Tienda y compra 'Alarmas Infinitas' para crear más.", color = CleanTextDim) },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    showAlarmLimitDialog = false
+                                    currentSection = AppSection.SHOP
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = WakeBlue)
+                            ) {
+                                Text("Ir a la Tienda", color = CleanText, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showAlarmLimitDialog = false }) {
+                                Text("Cancelar", color = CleanTextDim)
                             }
                         }
                     )
@@ -677,26 +643,119 @@ fun MainScreen() {
                         XpRewardDialog(info = info, onDismiss = { rewardDialog = null })
                     }
                 }
+
+                if (readingMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Brush.verticalGradient(listOf(Color(0x33FF6600), Color(0x22FF8800))))
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun FakeAdDialog(onDismiss: () -> Unit, onReward: () -> Unit) {
-    var secondsLeft by remember { mutableIntStateOf(3) }
-    LaunchedEffect(Unit) {
-        while (secondsLeft > 0) { delay(1000); secondsLeft-- }
-        onReward(); onDismiss()
-    }
-    Dialog(onDismissRequest = { /* Bloqueado */ }) {
-        Box(modifier = Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xFF1E1E1E)), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("ANUNCIO", color = Color.Gray, fontSize = 12.sp, letterSpacing = 2.sp)
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("📺", fontSize = 64.sp)
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Espera $secondsLeft segundos...", color = TextWhite, fontWeight = FontWeight.Bold)
+fun EditAlarmDialog(
+    alarm: AlarmItem,
+    onDismiss: () -> Unit,
+    onSave: (AlarmItem) -> Unit,
+    onDelete: () -> Unit,
+    streakManager: StreakManager
+) {
+    var hour by remember { mutableIntStateOf(alarm.hour) }
+    var minute by remember { mutableIntStateOf(alarm.minute) }
+    var color by remember { mutableStateOf(alarm.colorHex) }
+    var rounds by remember { mutableIntStateOf(alarm.rounds) }
+
+    val maxRounds = if (streakManager.hasExtraRounds()) 10 else 4
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = CleanSurface),
+            shape = RoundedCornerShape(28.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Editar Alarma", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = CleanText)
+                    Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(CleanSurfaceVariant).clickable { onDismiss() }, contentAlignment = Alignment.Center) {
+                        Text("✕", color = CleanTextDim, fontSize = 16.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    NumberPicker(value = hour, range = 0..23, onValueChange = { hour = it })
+                    Text(":", fontSize = 32.sp, fontWeight = FontWeight.Light, color = CleanText, modifier = Modifier.padding(horizontal = 8.dp))
+                    NumberPicker(value = minute, range = 0..59, onValueChange = { minute = it })
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text("Rondas", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    items((1..maxRounds).toList()) { r ->
+                        FilterChip(
+                            selected = rounds == r,
+                            onClick = { rounds = r },
+                            label = { Text("$r", fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = WakeBlue,
+                                selectedLabelColor = CleanText,
+                                containerColor = CleanSurfaceVariant,
+                                labelColor = CleanText
+                            ),
+                            border = null
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text("Color", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                Spacer(modifier = Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    val colors = if (streakManager.hasExtraColors()) {
+                        listOf("DEFAULT" to WakeBlue, "RED" to Color(0xFFFF5252), "GREEN" to Color(0xFF00E676), "PURPLE" to Color(0xFFE040FB), "ORANGE" to Color(0xFFFF9800), "YELLOW" to Color(0xFFFFEB3B), "PINK" to Color(0xFFFF4081), "CYAN" to Color(0xFF00E5FF))
+                    } else {
+                        listOf("DEFAULT" to WakeBlue, "RED" to Color(0xFFFF5252), "BLUE" to Color(0xFF448AFF))
+                    }
+                    items(colors) { (hex, c) ->
+                        val isSelected = color == hex
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(c)
+                                .border(if (isSelected) 3.dp else 0.dp, CleanText, CircleShape)
+                                .clickable { color = hex }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Button(
+                    onClick = { onSave(alarm.copy(hour = hour, minute = minute, colorHex = color, rounds = rounds)) },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = WakeBlue),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("Guardar Cambios", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                TextButton(
+                    onClick = { onDelete() },
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) {
+                    Text("Eliminar Alarma", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
         }
     }
@@ -705,72 +764,40 @@ fun FakeAdDialog(onDismiss: () -> Unit, onReward: () -> Unit) {
 @Composable
 fun LevelRewardsDialog(onDismiss: () -> Unit) {
     AlertDialog(
-        onDismissRequest = onDismiss, containerColor = CardBackground,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(AmberAccent.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) { Text("🎁", fontSize = 18.sp) }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("Recompensas de Nivel", color = TextWhite, fontWeight = FontWeight.Bold)
-            }
-        },
+        onDismissRequest = onDismiss,
+        containerColor = CleanSurface,
+        title = { Text("Recompensas de Nivel", color = CleanText, fontWeight = FontWeight.Bold) },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text("Cada vez que subas de nivel superando desafíos, obtendrás recompensas directas en tu cuenta:", fontSize = 13.sp, color = TextWhite, fontWeight = FontWeight.SemiBold)
+            Column {
+                Text("Cada vez que subas de nivel superando desafíos, obtendrás recompensas directas:", fontSize = 14.sp, color = CleanTextDim)
                 Spacer(modifier = Modifier.height(16.dp))
-                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(SurfaceDark).border(1.dp, AmberAccent.copy(alpha = 0.4f), RoundedCornerShape(12.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(AmberAccent.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) { Text("⚡", fontSize = 20.sp) }
+                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(CleanSurfaceVariant).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("⚡", fontSize = 24.sp)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Text("Puntos de Energía", color = AmberAccent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Gana +50 🪙 por cada nivel alcanzado.", color = TextMuted, fontSize = 12.sp)
+                        Text("Puntos de Energía", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Gana +50 🪙 por cada nivel alcanzado.", color = CleanTextDim, fontSize = 12.sp)
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Recuerda: resolver desafíos también te otorga XP y puntos directamente. ¡Mantén tu racha activa!", fontSize = 12.sp, color = TextMuted, lineHeight = 18.sp)
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("¡A por ello!", color = AmberAccent, fontWeight = FontWeight.Bold) } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Entendido", color = WakeBlue, fontWeight = FontWeight.Bold) } }
     )
 }
 
 @Composable
 fun XpRewardDialog(info: RewardInfo, onDismiss: () -> Unit) {
-    val scale = remember { Animatable(0.6f) }
-    val glow = remember { Animatable(0f) }
-    var displayedXp by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) {
-        scale.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow))
-        glow.animateTo(1f, tween(400))
-        val steps = 30
-        for (i in 0..steps) { displayedXp = (info.xpGained * i / steps); delay(18) }
-    }
     Dialog(onDismissRequest = { /* bloquea cierre */ }) {
-        Box(modifier = Modifier.fillMaxWidth().scale(scale.value).clip(RoundedCornerShape(28.dp)).background(Brush.verticalGradient(listOf(CardBackground, SurfaceDark))).border(2.dp, AmberAccent.copy(alpha = glow.value), RoundedCornerShape(28.dp)).padding(28.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(CleanSurface).padding(32.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                val infinite = rememberInfiniteTransition(label = "reward")
-                val pulse by infinite.animateFloat(1f, 1.15f, infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse")
-                Text(text = if (info.levelUp) "🎉" else "⭐", fontSize = 64.sp, modifier = Modifier.scale(pulse))
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(text = if (info.levelUp) "¡NIVEL SUBIDO!" else "¡DESAFÍO COMPLETADO!", fontSize = 18.sp, fontWeight = FontWeight.Black, color = if (info.levelUp) AmberAccent else SuccessGreen, letterSpacing = 1.5.sp, textAlign = TextAlign.Center)
+                Text(text = if (info.levelUp) "🎉" else "⭐", fontSize = 64.sp)
                 Spacer(modifier = Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("+$displayedXp", fontSize = 42.sp, fontWeight = FontWeight.Black, color = AmberAccent)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("XP", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AmberAccent.copy(alpha = 0.8f))
-                }
-                if (info.levelUp) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Nivel ${info.oldLevel}", fontSize = 14.sp, color = TextMuted, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("➜", fontSize = 16.sp, color = AmberAccent)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Nivel ${info.newLevel}", fontSize = 18.sp, color = TextWhite, fontWeight = FontWeight.Black)
-                    }
-                }
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = AmberAccent), shape = RoundedCornerShape(16.dp)) {
-                    Text("¡SEGUIR!", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
+                Text(text = if (info.levelUp) "¡NIVEL SUBIDO!" else "¡COMPLETADO!", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = CleanText, textAlign = TextAlign.Center)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("+${info.xpGained} XP", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = WakeBlue)
+                Spacer(modifier = Modifier.height(32.dp))
+                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(16.dp)) {
+                    Text("Continuar", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }
@@ -779,16 +806,73 @@ fun XpRewardDialog(info: RewardInfo, onDismiss: () -> Unit) {
 
 @Composable
 fun WakeBottomBar(current: AppSection, onSelect: (AppSection) -> Unit) {
-    Surface(color = SurfaceDark.copy(alpha = 0.95f), tonalElevation = 8.dp, shadowElevation = 16.dp) {
-        Row(modifier = Modifier.fillMaxWidth().navigationBarsPadding().height(70.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+    Surface(color = CleanBg.copy(alpha = 0.98f), tonalElevation = 0.dp, shadowElevation = 0.dp) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .height(72.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             AppSection.values().forEach { section ->
                 val selected = section == current
-                Column(modifier = Modifier.weight(1f).fillMaxHeight().clickable { onSelect(section) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(if (selected) RedPrimary.copy(alpha = 0.2f) else Color.Transparent), contentAlignment = Alignment.Center) {
-                        Text(section.emoji, fontSize = if (selected) 22.sp else 20.sp)
+                val color = if (selected) CleanText else CleanTextDim
+                val stroke = if (selected) 2.5.dp else 1.5.dp
+
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxHeight().clickable { onSelect(section) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Canvas(modifier = Modifier.size(24.dp)) {
+                        val w = size.width
+                        val h = size.height
+                        val s = stroke.toPx()
+
+                        when (section) {
+                            AppSection.ALARMS -> {
+                                drawCircle(color = color, radius = w / 2.5f, style = Stroke(width = s))
+                                drawLine(color = color, start = Offset(w/2, h/2 - w/5), end = Offset(w/2, h/2), strokeWidth = s, cap = StrokeCap.Round)
+                                drawLine(color = color, start = Offset(w/2, h/2), end = Offset(w/2 + w/5, h/2), strokeWidth = s, cap = StrokeCap.Round)
+                                drawLine(color = color, start = Offset(w*0.2f, h*0.15f), end = Offset(w*0.35f, h*0.25f), strokeWidth = s, cap = StrokeCap.Round)
+                                drawLine(color = color, start = Offset(w*0.8f, h*0.15f), end = Offset(w*0.65f, h*0.25f), strokeWidth = s, cap = StrokeCap.Round)
+                            }
+                            AppSection.PROGRESS -> {
+                                drawLine(color = color, start = Offset(w*0.2f, h*0.9f), end = Offset(w*0.2f, h*0.5f), strokeWidth = s, cap = StrokeCap.Round)
+                                drawLine(color = color, start = Offset(w*0.5f, h*0.9f), end = Offset(w*0.5f, h*0.2f), strokeWidth = s, cap = StrokeCap.Round)
+                                drawLine(color = color, start = Offset(w*0.8f, h*0.9f), end = Offset(w*0.8f, h*0.6f), strokeWidth = s, cap = StrokeCap.Round)
+                            }
+                            AppSection.SHOP -> {
+                                drawRoundRect(color = color, topLeft = Offset(w*0.15f, h*0.35f), size = Size(w*0.7f, h*0.5f), cornerRadius = CornerRadius(4.dp.toPx()), style = Stroke(width = s))
+                                drawArc(color = color, startAngle = 180f, sweepAngle = 180f, useCenter = false, topLeft = Offset(w*0.3f, h*0.1f), size = Size(w*0.4f, h*0.4f), style = Stroke(width = s, cap = StrokeCap.Round))
+                            }
+                            AppSection.SETTINGS -> {
+                                // ENGRANAJE PERFECTO VECTORIAL
+                                val center = Offset(w/2, h/2)
+                                val rOuter = w * 0.45f
+                                val rInner = w * 0.25f
+                                val teeth = 8
+                                val path = Path()
+                                for (i in 0 until teeth * 2) {
+                                    val r = if (i % 2 == 0) rOuter else rOuter * 0.75f
+                                    val angle = (i * Math.PI / teeth).toFloat() - (Math.PI / 2).toFloat()
+                                    val x = center.x + r * kotlin.math.cos(angle)
+                                    val y = center.y + r * kotlin.math.sin(angle)
+                                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                                }
+                                path.close()
+                                drawPath(path, color = color, style = Stroke(width = s, join = StrokeJoin.Round))
+                                drawCircle(color = color, radius = rInner, center = center, style = Stroke(width = s))
+                            }
+                        }
                     }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(section.label, fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, color = if (selected) RedAccent else TextMuted)
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    if (selected) {
+                        Text(section.label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = color)
+                    }
                 }
             }
         }
@@ -796,15 +880,27 @@ fun WakeBottomBar(current: AppSection, onSelect: (AppSection) -> Unit) {
 }
 
 @Composable
-fun AlarmsSection(alarms: List<AlarmItem>, onToggle: (AlarmItem, Boolean) -> Unit, onDelete: (AlarmItem) -> Unit) {
-    if (alarms.isEmpty()) { EmptyState() } else {
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 100.dp)) {
+fun AlarmsSection(
+    alarms: List<AlarmItem>,
+    onToggle: (AlarmItem, Boolean) -> Unit,
+    onDelete: (AlarmItem) -> Unit,
+    onEdit: (AlarmItem) -> Unit
+) {
+    if (alarms.isEmpty()) {
+        EmptyState()
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(bottom = 100.dp)
+        ) {
             items(alarms, key = { it.id }) { alarm ->
-                var visible by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) { visible = true }
-                AnimatedVisibility(visible = visible, enter = fadeIn(animationSpec = tween(400)) + slideInVertically(initialOffsetY = { 50 }, animationSpec = tween(400))) {
-                    AlarmCard(alarm = alarm, onToggle = { enabled -> onToggle(alarm, enabled) }, onDelete = { onDelete(alarm) })
-                }
+                AlarmCard(
+                    alarm = alarm,
+                    onToggle = { enabled -> onToggle(alarm, enabled) },
+                    onDelete = { onDelete(alarm) },
+                    onClick = { onEdit(alarm) }
+                )
             }
         }
     }
@@ -812,61 +908,75 @@ fun AlarmsSection(alarms: List<AlarmItem>, onToggle: (AlarmItem, Boolean) -> Uni
 
 @Composable
 fun EmptyState() {
-    val infinite = rememberInfiniteTransition(label = "empty")
-    val scale by infinite.animateFloat(0.95f, 1.05f, infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "scale")
-    Column(modifier = Modifier.fillMaxSize().padding(bottom = 80.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(modifier = Modifier.size(120.dp).scale(scale).clip(CircleShape).background(RedPrimary.copy(alpha = 0.12f)).border(2.dp, RedAccent.copy(alpha = 0.4f), CircleShape), contentAlignment = Alignment.Center) {
-            Text("⏰", fontSize = 60.sp)
-        }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(bottom = 80.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("⏰", fontSize = 80.sp, color = CleanSurfaceVariant)
         Spacer(modifier = Modifier.height(24.dp))
-        Text("Sin alarmas programadas", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("No hay alarmas próximas", color = CleanText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Pulsa  +  para crear la primera", color = TextMuted, fontSize = 13.sp)
+        Text("Pulsa el botón + para crear una", color = CleanTextDim, fontSize = 16.sp)
     }
 }
 
 @Composable
-fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Unit) {
-    val accentColor = challengeAccent(alarm.challengeType)
+fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Unit, onClick: () -> Unit) {
+    val accentColor = getAlarmColor(alarm.colorHex, WakeBlue)
     val timeFormatted = String.format("%02d:%02d", alarm.hour, alarm.minute)
-    val glow by animateFloatAsState(targetValue = if (alarm.isEnabled) 1f else 0f, animationSpec = tween(500), label = "glow")
 
     Card(
-        modifier = Modifier.fillMaxWidth().shadow(if (alarm.isEnabled) 16.dp else 0.dp, RoundedCornerShape(24.dp), ambientColor = accentColor, spotColor = accentColor).border(1.dp, if (alarm.isEnabled) accentColor.copy(alpha = 0.5f * glow) else CardBorder, RoundedCornerShape(24.dp)),
-        colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = 0.75f)),
-        shape = RoundedCornerShape(24.dp)
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = CleanSurface.copy(alpha = 0.95f)),
+        shape = RoundedCornerShape(20.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            Box(modifier = Modifier.width(6.dp).fillMaxHeight().background(Brush.verticalGradient(listOf(accentColor.copy(alpha = if (alarm.isEnabled) 1f else 0.25f), accentColor.copy(alpha = if (alarm.isEnabled) 0.3f else 0.1f)))))
-            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(52.dp).clip(CircleShape).background(accentColor.copy(alpha = 0.15f)).border(1.dp, accentColor.copy(alpha = 0.4f), CircleShape), contentAlignment = Alignment.Center) {
-                    Text(challengeEmoji(alarm.challengeType), fontSize = 26.sp)
-                }
-                Spacer(modifier = Modifier.width(14.dp))
+            Box(modifier = Modifier.width(6.dp).fillMaxHeight().background(accentColor))
+
+            Row(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = timeFormatted, fontSize = 32.sp, fontWeight = FontWeight.Black, color = if (alarm.isEnabled) TextWhite else TextMuted, letterSpacing = (-1).sp)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(challengeTitle(alarm.challengeType), fontSize = 12.sp, color = accentColor, fontWeight = FontWeight.SemiBold)
-                        Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(TextMuted))
-                        Text(text = alarm.difficulty, fontSize = 12.sp, color = AmberAccent, fontWeight = FontWeight.SemiBold)
-                    }
-                    if (!alarm.soundName.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🎵", fontSize = 11.sp)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = alarm.soundName, fontSize = 11.sp, color = SuccessGreen, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        text = timeFormatted,
+                        fontSize = 40.sp,
+                        fontWeight = FontWeight.Light,
+                        color = if (alarm.isEnabled) CleanText else CleanTextDim,
+                        letterSpacing = (-1).sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${challengeTitle(alarm.challengeType)} · ${alarm.difficulty}",
+                            fontSize = 13.sp,
+                            color = CleanTextDim,
+                            fontWeight = FontWeight.Medium
+                        )
+                        if (alarm.rounds > 1) {
+                            Text(" · ${alarm.rounds} rondas", fontSize = 13.sp, color = CleanTextDim)
                         }
-                    } else {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(text = "🔔 Sonido del sistema", fontSize = 11.sp, color = TextMuted.copy(alpha = 0.7f))
+                    }
+
+                    if (!alarm.soundName.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("🎵 ${alarm.soundName}", fontSize = 12.sp, color = CleanTextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Switch(checked = alarm.isEnabled, onCheckedChange = onToggle, colors = SwitchDefaults.colors(checkedThumbColor = TextWhite, checkedTrackColor = accentColor, uncheckedThumbColor = TextMuted, uncheckedTrackColor = SurfaceDark))
-                    Box(modifier = Modifier.size(30.dp).clip(CircleShape).clickable { onDelete() }, contentAlignment = Alignment.Center) {
-                        Text("🗑", fontSize = 16.sp)
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Switch(
+                        checked = alarm.isEnabled,
+                        onCheckedChange = onToggle,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = CleanText,
+                            checkedTrackColor = accentColor,
+                            uncheckedThumbColor = CleanTextDim,
+                            uncheckedTrackColor = CleanSurfaceVariant
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onDelete() }, contentAlignment = Alignment.Center) {
+                        Text("🗑", fontSize = 18.sp)
                     }
                 }
             }
@@ -880,37 +990,30 @@ fun ProgressSection(context: Context, streak: Int, points: Int, level: Int, xp: 
     val unlockedCount = achievementManager.unlockedCount()
     val xpNeeded = StreakManager.xpForLevel(level)
 
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(modifier = Modifier.size(100.dp).clip(CircleShape).background(SurfaceDark).border(2.dp, RedAccent, CircleShape), contentAlignment = Alignment.Center) {
-            Text("👤", fontSize = 48.sp)
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(text = "Tu progreso", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TextWhite)
-        Text(text = "Sigue así, cada día cuenta", fontSize = 13.sp, color = AmberAccent)
-        Spacer(modifier = Modifier.height(28.dp))
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = 0.8f)), shape = RoundedCornerShape(20.dp)) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                ProfileStatRow("Nivel", "$level 🎖️")
-                Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
-                ProfileStatRow("XP", "$xp / $xpNeeded ⚡")
-                Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
-                ProfileStatRow("Racha Activa", "$streak Días 🔥")
-                Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
-                ProfileStatRow("Puntos de Energía", "$points 🪙")
-                Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
-                ProfileStatRow("Logros", "$unlockedCount / ${AchievementCatalog.all.size} 🏆")
-                Divider(color = CardBorder, modifier = Modifier.padding(vertical = 12.dp))
-                ProfileStatRow("Efectividad Alarma", "100%")
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+        Text("Tu Progreso", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = CleanSurface), shape = RoundedCornerShape(20.dp)) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                ProfileStatRow("Nivel", "$level")
+                HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
+                ProfileStatRow("XP", "$xp / $xpNeeded")
+                HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
+                ProfileStatRow("Racha Activa", "$streak Días")
+                HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
+                ProfileStatRow("Puntos de Energía", "$points")
             }
         }
-        Spacer(modifier = Modifier.height(24.dp))
-        Text("LOGROS", fontSize = 13.sp, fontWeight = FontWeight.Black, color = TextMuted, letterSpacing = 1.5.sp, modifier = Modifier.align(Alignment.Start))
-        Spacer(modifier = Modifier.height(12.dp))
+
+        Spacer(modifier = Modifier.height(32.dp))
+        Text("LOGROS", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = CleanTextDim, letterSpacing = 1.sp)
+        Spacer(modifier = Modifier.height(16.dp))
         AchievementCatalog.all.forEach { ach ->
             val unlocked = achievementManager.isUnlocked(ach.id)
             val progress = achievementManager.getProgress(ach, streak, points)
             AchievementRow(ach, unlocked, progress)
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 }
@@ -918,60 +1021,35 @@ fun ProgressSection(context: Context, streak: Int, points: Int, level: Int, xp: 
 @Composable
 fun ProfileStatRow(label: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = TextMuted, fontSize = 14.sp)
-        Text(value, color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Text(label, color = CleanTextDim, fontSize = 16.sp)
+        Text(value, color = CleanText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
     }
 }
 
 @Composable
 fun AchievementRow(achievement: Achievement, unlocked: Boolean, progress: Int) {
-    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (unlocked) CardBackground.copy(alpha = 0.8f) else SurfaceDark.copy(alpha = 0.5f)).border(1.dp, if (unlocked) RedAccent.copy(alpha = 0.4f) else CardBorder, RoundedCornerShape(14.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CleanSurface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(achievement.emoji, fontSize = 24.sp, modifier = Modifier.width(40.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(achievement.title, color = if (unlocked) TextWhite else TextMuted, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            Text(achievement.description, color = TextMuted, fontSize = 11.sp)
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "$progress/${achievement.required}", color = if (unlocked) SuccessGreen else AmberAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                Spacer(modifier = Modifier.width(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(AmberAccent.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("⬆️", fontSize = 10.sp)
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text("+1 Nivel", color = AmberAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(SuccessGreen.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                        Text("+${achievement.rewardPoints} 🪙", color = SuccessGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
+            Text(achievement.title, color = if (unlocked) CleanText else CleanTextDim, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(achievement.description, color = CleanTextDim, fontSize = 13.sp)
         }
-        Text(if (unlocked) "✓" else "🔒", fontSize = 16.sp)
+        Text(if (unlocked) "✓" else "$progress/${achievement.required}", color = if (unlocked) WakeBlue else CleanTextDim, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 fun InfoDialog(onDismiss: () -> Unit) {
     AlertDialog(
-        onDismissRequest = onDismiss, containerColor = CardBackground,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(RedPrimary.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) { Text("ℹ️", fontSize = 18.sp) }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("¿Qué es WakeApp?", color = TextWhite, fontWeight = FontWeight.Bold)
-            }
-        },
+        onDismissRequest = onDismiss,
+        containerColor = CleanSurface,
+        title = { Text("¿Qué es WakeApp?", color = CleanText, fontWeight = FontWeight.Bold) },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text("WakeApp es tu despertador inteligente que no te deja volver a dormir.", fontSize = 13.sp, color = TextWhite, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("En lugar de un simple botón de \"apagar\", cada alarma te lanza un desafío mental o físico:\n\n• Cálculo mental\n• Frase exacta\n• Delineado\n• Test de Stroop\n• Sacudida", fontSize = 13.sp, color = TextMuted)
+            Column {
+                Text("WakeApp es tu despertador inteligente. En lugar de un simple botón, cada alarma te lanza desafíos mentales o físicos que debes superar para desactivarla.", fontSize = 15.sp, color = CleanTextDim, lineHeight = 22.sp)
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Entendido", color = AmberAccent, fontWeight = FontWeight.Bold) } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Entendido", color = WakeBlue, fontWeight = FontWeight.Bold) } }
     )
 }
 
@@ -980,68 +1058,115 @@ fun CustomTimePickerDialog(
     onDismiss: () -> Unit, onConfirm: (Int, Int) -> Unit,
     selectedChallengeType: String, onChallengeTypeSelected: (String) -> Unit,
     selectedDifficulty: String, onDifficultySelected: (String) -> Unit,
-    soundName: String?, onPickSound: () -> Unit, onClearSound: () -> Unit
+    selectedRounds: Int, onRoundsChange: (Int) -> Unit,
+    soundName: String?, onPickSound: () -> Unit, onClearSound: () -> Unit,
+    selectedColor: String, onColorSelected: (String) -> Unit,
+    streakManager: StreakManager
 ) {
     var selectedHour by remember { mutableIntStateOf(7) }
     var selectedMinute by remember { mutableIntStateOf(0) }
+    val maxRounds = if (streakManager.hasExtraRounds()) 10 else 4
 
     AlertDialog(
-        onDismissRequest = onDismiss, containerColor = CardBackground,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(RedPrimary.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) { Text("⏰", fontSize = 18.sp) }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("Nueva Alarma", color = TextWhite, fontWeight = FontWeight.Bold)
-            }
-        },
+        onDismissRequest = onDismiss,
+        containerColor = CleanSurface,
+        title = { Text("Nueva Alarma", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 22.sp) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.verticalScroll(rememberScrollState())) {
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     NumberPicker(value = selectedHour, range = 0..23, onValueChange = { selectedHour = it })
-                    Text(":", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TextWhite, modifier = Modifier.padding(horizontal = 8.dp))
+                    Text(":", fontSize = 32.sp, fontWeight = FontWeight.Light, color = CleanText, modifier = Modifier.padding(horizontal = 8.dp))
                     NumberPicker(value = selectedMinute, range = 0..59, step = 1, onValueChange = { selectedMinute = it })
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Tipo de Desafío", fontSize = 13.sp, color = TextMuted, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
-                Spacer(modifier = Modifier.height(8.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(listOf("MATH" to "Cálculo", "TEXT" to "Frase", "TRACING" to "Delinear", "STROOP" to "Stroop", "SHAKE" to "Sacudir")) { (type, label) ->
-                        FilterChip(selected = selectedChallengeType == type, onClick = { onChallengeTypeSelected(type) }, label = { Text(label, fontSize = 12.sp) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = challengeAccent(type), selectedLabelColor = Color.Black, containerColor = SurfaceDark, labelColor = TextMuted))
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text("Color de la Alarma", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                Spacer(modifier = Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val colors = if (streakManager.hasExtraColors()) {
+                        listOf("DEFAULT" to WakeBlue, "RED" to Color(0xFFFF5252), "GREEN" to Color(0xFF00E676), "PURPLE" to Color(0xFFE040FB), "ORANGE" to Color(0xFFFF9800), "YELLOW" to Color(0xFFFFEB3B), "PINK" to Color(0xFFFF4081), "CYAN" to Color(0xFF00E5FF))
+                    } else {
+                        listOf("DEFAULT" to WakeBlue, "RED" to Color(0xFFFF5252), "BLUE" to Color(0xFF448AFF))
+                    }
+                    items(colors) { (hex, color) ->
+                        val isSelected = selectedColor == hex
+                        Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(color).border(if (isSelected) 4.dp else 0.dp, if (isSelected) CleanText else Color.Transparent, CircleShape).clickable { onColorSelected(hex) })
                     }
                 }
-                Spacer(modifier = Modifier.height(14.dp))
-                Text("Dificultad", fontSize = 13.sp, color = TextMuted, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+
+                Spacer(modifier = Modifier.height(24.dp))
+                Text("Tipo de Desafío", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                Spacer(modifier = Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(listOf("MATH" to "Cálculo", "TEXT" to "Frase", "TRACING" to "Delinear")) { (type, label) ->
+                        FilterChip(
+                            selected = selectedChallengeType == type, onClick = { onChallengeTypeSelected(type) },
+                            label = { Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium) },
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = WakeBlue, selectedLabelColor = CleanText, containerColor = CleanSurfaceVariant, labelColor = CleanText),
+                            border = null
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+                Text("Rondas", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
                 Spacer(modifier = Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items((1..maxRounds).toList()) { r ->
+                        FilterChip(
+                            selected = selectedRounds == r,
+                            onClick = { onRoundsChange(r) },
+                            label = { Text("$r", fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = WakeBlue, selectedLabelColor = CleanText, containerColor = CleanSurfaceVariant, labelColor = CleanText),
+                            border = null
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+                Text("Dificultad", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                Spacer(modifier = Modifier.height(12.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(listOf("EASY", "MEDIUM", "HARD", "EXTREME")) { diff ->
-                        FilterChip(selected = selectedDifficulty == diff, onClick = { onDifficultySelected(diff) }, label = { Text(diff, fontSize = 11.sp) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AmberAccent, selectedLabelColor = Color.Black, containerColor = SurfaceDark, labelColor = TextMuted))
+                        FilterChip(
+                            selected = selectedDifficulty == diff, onClick = { onDifficultySelected(diff) },
+                            label = { Text(diff, fontSize = 14.sp, fontWeight = FontWeight.Medium) },
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = WakeBlue, selectedLabelColor = CleanText, containerColor = CleanSurfaceVariant, labelColor = CleanText),
+                            border = null
+                        )
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+
+                Spacer(modifier = Modifier.height(24.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Sonido de Alarma", fontSize = 13.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-                    Text("MP3 · M4A · WAV · OGG", fontSize = 9.sp, color = TextMuted.copy(alpha = 0.6f))
+                    Text("Sonido", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(SurfaceDark).border(1.dp, if (soundName != null) SuccessGreen.copy(alpha = 0.7f) else CardBorder, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (soundName != null) "🎵" else "🔔", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(soundName ?: "Sonido predeterminado", fontSize = 13.sp, color = if (soundName != null) SuccessGreen else TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(if (soundName != null) "Seleccionado" else "Sin personalizar", fontSize = 10.sp, color = TextMuted.copy(alpha = 0.7f))
-                    }
+                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(CleanSurfaceVariant).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (soundName != null) "🎵" else "🔔", fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(soundName ?: "Predeterminado", fontSize = 15.sp, color = CleanText, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (soundName != null) {
-                        Box(modifier = Modifier.size(28.dp).clip(CircleShape).clickable { onClearSound() }, contentAlignment = Alignment.Center) { Text("✕", color = Color(0xFFFF5252), fontSize = 14.sp) }
+                        Box(modifier = Modifier.size(24.dp).clickable { onClearSound() }, contentAlignment = Alignment.Center) { Text("✕", color = CleanTextDim, fontSize = 14.sp) }
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onPickSound, modifier = Modifier.fillMaxWidth().height(44.dp), colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark), shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, AmberAccent.copy(alpha = 0.6f))) {
-                    Text("📁  Elegir archivo de audio", color = AmberAccent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onPickSound, modifier = Modifier.fillMaxWidth().height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CleanSurfaceVariant), shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Elegir archivo de audio", color = CleanText, fontSize = 14.sp)
                 }
             }
         },
-        confirmButton = { Button(onClick = { onConfirm(selectedHour, selectedMinute) }, colors = ButtonDefaults.buttonColors(containerColor = RedPrimary)) { Text("Guardar", fontWeight = FontWeight.Bold) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = TextMuted) } }
+        confirmButton = {
+            Button(onClick = { onConfirm(selectedHour, selectedMinute) }, colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(12.dp)) {
+                Text("Guardar Alarma", fontWeight = FontWeight.Bold, color = CleanText)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = CleanTextDim) } }
     )
 }
 
@@ -1049,11 +1174,41 @@ fun CustomTimePickerDialog(
 fun NumberPicker(value: Int, range: IntRange, step: Int = 1, onValueChange: (Int) -> Unit) {
     val items = remember(range, step) { range.filter { it % step == 0 } }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = items.indexOf(value).coerceAtLeast(0))
-    Box(modifier = Modifier.height(120.dp).width(64.dp), contentAlignment = Alignment.Center) {
-        LazyColumn(state = listState, horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxHeight()) {
+    val itemHeight = 48.dp
+    val visibleItems = 3
+    val boxHeight = itemHeight * visibleItems
+    val verticalPadding = (boxHeight - itemHeight) / 2
+
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+            layoutInfo.visibleItemsInfo.minByOrNull { info -> kotlin.math.abs((info.offset + info.size / 2) - viewportCenter) }?.index
+        }.collect { centeredIndex ->
+            if (centeredIndex != null && centeredIndex in items.indices) {
+                val newValue = items[centeredIndex]
+                if (newValue != value) onValueChange(newValue)
+            }
+        }
+    }
+
+    Box(modifier = Modifier.height(boxHeight).width(80.dp), contentAlignment = Alignment.Center) {
+        LazyColumn(
+            state = listState, horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = verticalPadding),
+            flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
+        ) {
             items(items) { item ->
                 val isSelected = item == value
-                Text(text = String.format("%02d", item), fontSize = if (isSelected) 26.sp else 18.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) AmberAccent else TextMuted, modifier = Modifier.padding(vertical = 6.dp).clickable { onValueChange(item) })
+                Box(modifier = Modifier.height(itemHeight).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = String.format("%02d", item),
+                        fontSize = if (isSelected) 32.sp else 20.sp,
+                        fontWeight = if (isSelected) FontWeight.Normal else FontWeight.Light,
+                        color = if (isSelected) CleanText else CleanTextDim,
+                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }
@@ -1076,37 +1231,21 @@ fun AchievementUnlockedOverlay(info: RewardInfo, onDismiss: () -> Unit) {
     val current = queue.firstOrNull()
     if (current == null) { LaunchedEffect(Unit) { onDismiss() }; return }
     Dialog(onDismissRequest = { /* bloquea cierre */ }) {
-        val scale = remember(current.id) { Animatable(0.5f) }
-        val glow = remember(current.id) { Animatable(0f) }
-        val pulse = rememberInfiniteTransition(label = "achPulse")
-        val pulseScale by pulse.animateFloat(1f, 1.15f, infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulseScale")
-        LaunchedEffect(current.id) { scale.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow)); glow.animateTo(1f, tween(500)) }
-        Box(modifier = Modifier.fillMaxWidth().scale(scale.value).clip(RoundedCornerShape(28.dp)).background(Brush.verticalGradient(listOf(CardBackground, SurfaceDark))).border(2.dp, AmberAccent.copy(alpha = glow.value), RoundedCornerShape(28.dp)).padding(28.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(CleanSurface).padding(32.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = current.emoji, fontSize = 72.sp, modifier = Modifier.scale(pulseScale))
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(text = "¡LOGRO DESBLOQUEADO!", fontSize = 15.sp, fontWeight = FontWeight.Black, color = AmberAccent, letterSpacing = 1.5.sp, textAlign = TextAlign.Center)
+                Text(text = current.emoji, fontSize = 72.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "¡LOGRO DESBLOQUEADO!", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = CleanTextDim, letterSpacing = 1.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(text = current.title, fontSize = 26.sp, fontWeight = FontWeight.Black, color = TextWhite, textAlign = TextAlign.Center)
-                Spacer(modifier = Modifier.height(20.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("⬆️", fontSize = 32.sp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("+1 NIVEL", fontSize = 34.sp, fontWeight = FontWeight.Black, color = SuccessGreen)
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🪙", fontSize = 20.sp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("+${current.rewardPoints} PUNTOS", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AmberAccent)
-                }
-                if (queue.size > 1) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text("+${queue.size - 1} logro(s) más…", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-                }
+                Text(text = current.title, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = CleanText, textAlign = TextAlign.Center)
                 Spacer(modifier = Modifier.height(24.dp))
-                Button(onClick = { if (queue.size > 1) { queue = queue.drop(1) } else { onDismiss() } }, modifier = Modifier.fillMaxWidth().height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = AmberAccent), shape = RoundedCornerShape(16.dp)) {
-                    Text(if (queue.size > 1) "SIGUIENTE" else "¡GENIAL!", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) { Text("+1 NIVEL", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = WakeBlue) }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) { Text("+${current.rewardPoints} PUNTOS", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = CleanTextDim) }
+
+                Spacer(modifier = Modifier.height(32.dp))
+                Button(onClick = { if (queue.size > 1) { queue = queue.drop(1) } else { onDismiss() } }, modifier = Modifier.fillMaxWidth().height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(16.dp)) {
+                    Text(if (queue.size > 1) "Siguiente" else "Genial", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }
@@ -1118,6 +1257,8 @@ fun scheduleAlarm(context: Context, alarm: AlarmItem) {
     val intent = Intent(context, AlarmReceiver::class.java).apply {
         putExtra("CHALLENGE_TYPE", alarm.challengeType)
         putExtra("DIFFICULTY", alarm.difficulty)
+        putExtra("ROUNDS", alarm.rounds)
+        putExtra("XP_BOOST", alarm.xpBoost)
         putExtra("SOUND_URI", alarm.soundUri)
         putExtra("SOUND_NAME", alarm.soundName)
     }
@@ -1149,80 +1290,115 @@ fun cancelAlarm(context: Context, alarm: AlarmItem) {
 }
 
 @Composable
-fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit, onAchievementUnlocked: () -> Unit) {
-    val context = LocalContext.current
-    var hasTheme by remember { mutableStateOf(streakManager.isCyberpunkThemeUnlocked()) }
-    var freezeCount by remember { mutableStateOf(streakManager.getInventoryCount("freeze")) }
+fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit) {
+    var hasInfinite by remember { mutableStateOf(streakManager.hasInfiniteAlarms()) }
+    var hasColors by remember { mutableStateOf(streakManager.hasExtraColors()) }
+    var hasRounds by remember { mutableStateOf(streakManager.hasExtraRounds()) }
+    var hasNoAds by remember { mutableStateOf(streakManager.isNoAdsUnlocked()) }
+    var hasAvatar by remember { mutableStateOf(streakManager.isAvatarUnlocked()) }
+    var hasXpMultiplier by remember { mutableStateOf(streakManager.isXpMultiplierUnlocked()) }
 
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Text("SUMINISTROS", fontSize = 24.sp, fontWeight = FontWeight.Black, color = AmberAccent, letterSpacing = 2.sp)
-                Text("Mejoras y ventajas", fontSize = 12.sp, color = TextMuted)
-            }
-            Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(Brush.horizontalGradient(listOf(CardBackground, SurfaceDark))).border(1.5.dp, RedAccent, RoundedCornerShape(16.dp)).padding(horizontal = 16.dp, vertical = 10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🪙", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("$points", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = TextWhite)
-                }
-            }
+    val hasComplete = hasInfinite && hasColors && hasRounds && hasNoAds && hasAvatar && hasXpMultiplier
+
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+        Text("Tienda", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText)
+        Text("Mejoras permanentes", fontSize = 14.sp, color = CleanTextDim)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Saldo
+        Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CleanSurface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("🪙", fontSize = 24.sp)
+            Spacer(modifier = Modifier.width(12.dp))
+            Text("$points Puntos", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = CleanText)
         }
         Spacer(modifier = Modifier.height(24.dp))
 
-        // --- OBJETO 1: TEMA MATRIX ---
-        val canAffordTheme = points >= 150
-        val themeBorderColor = when { hasTheme -> SuccessGreen; canAffordTheme -> RedAccent; else -> CardBorder }
-
-        Card(modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(20.dp)).border(1.5.dp, themeBorderColor, RoundedCornerShape(20.dp)), colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = 0.8f)), shape = RoundedCornerShape(20.dp)) {
-            Row(modifier = Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(52.dp).clip(CircleShape).background(SurfaceDark), contentAlignment = Alignment.Center) { Text("👑", fontSize = 26.sp) }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Text("Fondo Matrix", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextWhite)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("Interfaz oscura verde/cian de bajo consumo.", fontSize = 12.sp, color = TextMuted, lineHeight = 16.sp)
+        // PACK OFERTA OPACO Y LLAMATIVO
+        if (!hasComplete) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CleanSurface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().border(2.dp, Brush.linearGradient(listOf(WakeBlue, Color(0xFF00E5FF))), RoundedCornerShape(16.dp))
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.background(WakeBlue.copy(alpha = 0.2f), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            Text("OFERTA", color = WakeBlue, fontWeight = FontWeight.Black, fontSize = 12.sp, letterSpacing = 1.sp)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Pack Completo", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Desbloquea todas las mejoras de la tienda de una vez. Ahorra tiempo y puntos.", color = CleanTextDim, fontSize = 13.sp, lineHeight = 18.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            if (points >= 100) {
+                                streakManager.unlockCompletePack()
+                                hasInfinite = true; hasColors = true; hasRounds = true
+                                hasNoAds = true; hasAvatar = true; hasXpMultiplier = true
+                                onBuy(100)
+                            }
+                        },
+                        enabled = points >= 100,
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = WakeBlue, disabledContainerColor = CleanSurfaceVariant),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Comprar Todo · 100 🪙", color = CleanText, fontWeight = FontWeight.Black, fontSize = 15.sp)
                     }
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Button(
-                    enabled = !hasTheme && canAffordTheme,
-                    onClick = { if (!hasTheme) { streakManager.unlockCyberpunkTheme(); hasTheme = true; onBuy(150); onAchievementUnlocked() } },
-                    colors = ButtonDefaults.buttonColors(containerColor = if (hasTheme) SuccessGreen.copy(alpha = 0.2f) else RedPrimary, disabledContainerColor = SurfaceDark),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text(if (hasTheme) "EQUIPADO" else "150 🪙", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = if (hasTheme) SuccessGreen else TextWhite)
-                }
             }
+            Spacer(modifier = Modifier.height(32.dp))
         }
-        Spacer(modifier = Modifier.height(16.dp))
 
-        // --- OBJETO 2: CONGELADOR DE RACHA ---
-        val canAffordFreeze = points >= 200
-        Card(modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(20.dp)).border(1.5.dp, if (canAffordFreeze) Color(0xFF00E5FF) else CardBorder, RoundedCornerShape(20.dp)), colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = 0.8f)), shape = RoundedCornerShape(20.dp)) {
-            Row(modifier = Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(52.dp).clip(CircleShape).background(Color(0xFF00E5FF).copy(alpha = 0.15f)), contentAlignment = Alignment.Center) { Text("🧊", fontSize = 26.sp) }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Text("Congelador de Racha", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextWhite)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("Protege tu racha de fuego durante 24h sin perderla.", fontSize = 12.sp, color = TextMuted, lineHeight = 16.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("En inventario: $freezeCount", fontSize = 11.sp, color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
-                    }
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Button(
-                    enabled = canAffordFreeze,
-                    onClick = { streakManager.addInventoryItem("freeze"); freezeCount++; onBuy(200) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00838F), disabledContainerColor = SurfaceDark),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("200 🪙", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = TextWhite)
-                }
-            }
+        Text("MEJORAS INDIVIDUALES", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = CleanTextDim, letterSpacing = 1.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        ShopItemRow("Alarmas Infinitas", "Crea todas las alarmas que quieras sin límite.", 1500, hasInfinite, points >= 1500) {
+            if (!hasInfinite) { streakManager.unlockInfiniteAlarms(); hasInfinite = true; onBuy(1500) }
+        }
+
+        ShopItemRow("Nuevos Marcadores", "Añade más colores para organizar tus alarmas.", 1200, hasColors, points >= 1200) {
+            if (!hasColors) { streakManager.unlockExtraColors(); hasColors = true; onBuy(1200) }
+        }
+
+        ShopItemRow("Más Asaltos", "Aumenta el límite de rondas por alarma a 10.", 1500, hasRounds, points >= 1500) {
+            if (!hasRounds) { streakManager.unlockExtraRounds(); hasRounds = true; onBuy(1500) }
+        }
+
+        ShopItemRow("Elimina todos los anuncios", "Una experiencia totalmente limpia y sin interrupciones.", 2000, hasNoAds, points >= 2000) {
+            if (!hasNoAds) { streakManager.unlockNoAds(); hasNoAds = true; onBuy(2000) }
+        }
+
+        ShopItemRow("Desbloquea tu Avatar", "Muestra una foto de perfil personalizada en la app.", 2500, hasAvatar, points >= 2500) {
+            if (!hasAvatar) { streakManager.unlockAvatar(); hasAvatar = true; onBuy(2500) }
+        }
+
+        ShopItemRow("Multiplicador de XP", "Gana el doble de experiencia al despertar.", 3000, hasXpMultiplier, points >= 3000) {
+            if (!hasXpMultiplier) { streakManager.unlockXpMultiplier(); hasXpMultiplier = true; onBuy(3000) }
+        }
+
+        Spacer(modifier = Modifier.height(40.dp))
+    }
+}
+
+@Composable
+fun ShopItemRow(title: String, desc: String, price: Int, isOwned: Boolean, canAfford: Boolean, onBuy: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).clip(RoundedCornerShape(16.dp)).background(CleanSurface).padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = CleanText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(desc, color = CleanTextDim, fontSize = 13.sp, lineHeight = 18.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("$price 🪙", color = if (canAfford || isOwned) WakeBlue else CleanTextDim, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Button(
+            onClick = onBuy, enabled = !isOwned && canAfford,
+            colors = ButtonDefaults.buttonColors(containerColor = WakeBlue, disabledContainerColor = CleanSurfaceVariant),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text(if (isOwned) "Equipado" else "Comprar", color = if (isOwned) CleanTextDim else CleanText, fontWeight = FontWeight.Bold)
         }
     }
 }

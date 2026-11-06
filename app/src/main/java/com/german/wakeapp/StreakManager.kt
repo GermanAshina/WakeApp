@@ -16,7 +16,41 @@ class StreakManager(context: Context) {
         }
     }
 
-    // Inventario de la tienda
+    // ---- COMPRAS DE LA TIENDA NUEVA ----
+    fun hasInfiniteAlarms(): Boolean = prefs.getBoolean("upgrade_infinite_alarms", false)
+    fun unlockInfiniteAlarms() = prefs.edit().putBoolean("upgrade_infinite_alarms", true).apply()
+
+    fun hasExtraColors(): Boolean = prefs.getBoolean("upgrade_extra_colors", false)
+    fun unlockExtraColors() = prefs.edit().putBoolean("upgrade_extra_colors", true).apply()
+
+    fun hasExtraRounds(): Boolean = prefs.getBoolean("upgrade_extra_rounds", false)
+    fun unlockExtraRounds() = prefs.edit().putBoolean("upgrade_extra_rounds", true).apply()
+
+    fun isNoAdsUnlocked(): Boolean = prefs.getBoolean("upgrade_no_ads", false)
+    fun unlockNoAds() = prefs.edit().putBoolean("upgrade_no_ads", true).apply()
+
+    fun isAvatarUnlocked(): Boolean = prefs.getBoolean("upgrade_avatar", false)
+    fun unlockAvatar() = prefs.edit().putBoolean("upgrade_avatar", true).apply()
+
+    fun isXpMultiplierUnlocked(): Boolean = prefs.getBoolean("upgrade_xp_multiplier", false)
+    fun unlockXpMultiplier() = prefs.edit().putBoolean("upgrade_xp_multiplier", true).apply()
+
+    fun hasCompletePack(): Boolean =
+        hasInfiniteAlarms() && hasExtraColors() && hasExtraRounds() &&
+                isNoAdsUnlocked() && isAvatarUnlocked() && isXpMultiplierUnlocked()
+
+    fun unlockCompletePack() {
+        prefs.edit()
+            .putBoolean("upgrade_infinite_alarms", true)
+            .putBoolean("upgrade_extra_colors", true)
+            .putBoolean("upgrade_extra_rounds", true)
+            .putBoolean("upgrade_no_ads", true)
+            .putBoolean("upgrade_avatar", true)
+            .putBoolean("upgrade_xp_multiplier", true)
+            .apply()
+    }
+
+    // Inventario clásico (por si acaso)
     fun getInventoryCount(item: String): Int = prefs.getInt("inv_$item", 0)
     fun addInventoryItem(item: String, amount: Int = 1) {
         val current = getInventoryCount(item)
@@ -62,16 +96,29 @@ class StreakManager(context: Context) {
     }
 
     fun registerSuccessfulWakeUp(): Int {
-        val currentStreak = getStreak() + 1
+        val calendar = java.util.Calendar.getInstance()
+        val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+        val minute = calendar.get(java.util.Calendar.MINUTE)
+
+        val countsForStreak = hour >= 6
+
+        val lastWake = prefs.getLong("LAST_WAKE_TIME", 0L)
+        val lastWakeCal = java.util.Calendar.getInstance().apply { timeInMillis = lastWake }
+        val sameDay = lastWakeCal.get(java.util.Calendar.YEAR) == calendar.get(java.util.Calendar.YEAR) &&
+                lastWakeCal.get(java.util.Calendar.DAY_OF_YEAR) == calendar.get(java.util.Calendar.DAY_OF_YEAR)
+        val alreadyCountedToday = sameDay && lastWake > 0L
+
+        val currentStreak = if (countsForStreak && !alreadyCountedToday) getStreak() + 1 else getStreak()
         val currentPoints = getPoints() + 50
+
         prefs.edit()
             .putInt("STREAK_KEY", currentStreak)
             .putInt("POINTS_KEY", currentPoints)
             .putLong("LAST_WAKE_TIME", System.currentTimeMillis())
             .apply()
+
         return currentStreak
     }
-
     fun addPoints(amount: Int) {
         val newPoints = getPoints() + amount
         prefs.edit().putInt("POINTS_KEY", newPoints).apply()
@@ -86,11 +133,6 @@ class StreakManager(context: Context) {
             prefs.edit().putInt("POINTS_KEY", points - amount).apply()
             true
         } else false
-    }
-
-    fun isCyberpunkThemeUnlocked(): Boolean = prefs.getBoolean("theme_cyberpunk", false)
-    fun unlockCyberpunkTheme() {
-        prefs.edit().putBoolean("theme_cyberpunk", true).apply()
     }
 
     fun getLevel(): Int = prefs.getInt("LEVEL_KEY", 1)

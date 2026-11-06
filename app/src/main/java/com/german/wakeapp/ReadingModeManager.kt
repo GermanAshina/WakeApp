@@ -4,12 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.view.Window
 import android.view.WindowManager
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 
 /**
- * Gestiona el "Modo Lectura": baja el brillo de la pantalla,
+ * Gestiona el "Modo Lectura": baja el brillo de la pantalla al mínimo (1%),
  * aplica un tinte cálido (filtro rojizo) y guarda la preferencia
  * para que se recuerde entre sesiones.
  */
@@ -17,6 +14,11 @@ class ReadingModeManager(context: Context) {
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("wakeapp_reading", Context.MODE_PRIVATE)
+
+    companion object {
+        /** Brillo mínimo práctico (1%). Por debajo Android puede ignorarlo. */
+        const val MIN_BRIGHTNESS = 0.01f
+    }
 
     fun isEnabled(): Boolean = prefs.getBoolean("reading_enabled", false)
 
@@ -26,13 +28,13 @@ class ReadingModeManager(context: Context) {
 
     /**
      * Aplica el modo lectura a una ventana dada.
-     * - Si está activo: baja el brillo al 30% y aplica un overlay rojizo.
+     * - Si está activo: baja el brillo al 1% y aplica un overlay rojizo.
      * - Si está desactivado: restaura el brillo normal y quita el overlay.
      */
     fun applyToWindow(window: Window, enabled: Boolean) {
         val params = window.attributes
         if (enabled) {
-            params.screenBrightness = 0.3f
+            params.screenBrightness = getCustomBrightness()
         } else {
             params.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
         }
@@ -41,12 +43,12 @@ class ReadingModeManager(context: Context) {
 
     /**
      * Devuelve el valor de brillo manual si el usuario lo ha configurado.
-     * Por defecto 30%.
+     * Por defecto 1%.
      */
     fun getCustomBrightness(): Float =
-        prefs.getFloat("reading_brightness", 0.3f)
+        prefs.getFloat("reading_brightness", MIN_BRIGHTNESS)
 
     fun setCustomBrightness(value: Float) {
-        prefs.edit().putFloat("reading_brightness", value.coerceIn(0.05f, 1f)).apply()
+        prefs.edit().putFloat("reading_brightness", value.coerceIn(0.01f, 1f)).apply()
     }
 }

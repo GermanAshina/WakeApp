@@ -19,17 +19,22 @@ object AchievementCatalog {
         Achievement("streak_3", "Tres son multitud", "3 días seguidos despertando.", "🔥", 100, 3),
         Achievement("streak_7", "No hay semana sin siete días", "7 días seguidos.", "🔥🔥", 250, 7),
         Achievement("streak_21", "Nuevo Hábito Adquirido", "21 días seguidos. Ya es rutina.", "🧠", 500, 21),
+        Achievement("streak_30", "Mes de Hierro", "30 días seguidos.", "🛡️", 750, 30),
         Achievement("streak_100", "Ambicioso", "100 días seguidos. Leyenda.", "👑", 2000, 100),
 
         // Minijuegos (Totales)
-        Achievement("all_games", "En la variedad está el gusto", "Completa los 5 tipos de desafíos.", "🎯", 300, 5),
         Achievement("math_10", "2x2=?", "Completa 10 desafíos de matemáticas.", "🧮", 150, 10),
         Achievement("text_10", "Despacito y con buena letra", "Completa 10 desafíos de escribir.", "✍️", 150, 10),
         Achievement("tracing_10", "No te pases de la raya", "Completa 10 desafíos de delinear.", "✏️", 150, 10),
 
+        // Rondas múltiples
+        Achievement("rounds_5", "Doble o nada", "Supera una alarma de 5 rondas.", "🎯", 200, 1),
+        Achievement("rounds_10", "Maratón mental", "Supera una alarma de 10 rondas.", "🏃", 400, 1),
+
         // Otros
         Achievement("early_7am", "Madrugador", "Levántate a las 7:00h o antes.", "🌅", 150, 1),
         Achievement("shop_buyer", "Comprador", "Compra un objeto en la Tienda.", "🛒", 100, 1),
+        Achievement("shop_10", "Coleccionista", "Compra 10 objetos en la Tienda.", "🧺", 400, 10),
         Achievement("rich_10k", "Avaricioso", "Acumula 10,000 puntos.", "💰", 500, 10000),
         Achievement("ad_watcher", "Caja Tonta", "Ve un anuncio recompensado.", "📺", 100, 1)
     )
@@ -57,7 +62,7 @@ class AchievementManager(context: Context) {
             "math_10" -> prefs.getInt("count_MATH", 0).coerceIn(0, achievement.required)
             "text_10" -> prefs.getInt("count_TEXT", 0).coerceIn(0, achievement.required)
             "tracing_10" -> prefs.getInt("count_TRACING", 0).coerceIn(0, achievement.required)
-            "all_games" -> prefs.getInt("count_unique_games", 0).coerceIn(0, achievement.required)
+            "shop_10" -> prefs.getInt("shop_purchases", 0).coerceIn(0, achievement.required)
             else -> currentStreak.coerceIn(0, achievement.required)
         }
     }
@@ -68,6 +73,7 @@ class AchievementManager(context: Context) {
         if (streak >= 3 && unlock("streak_3")) newly.add(byId("streak_3"))
         if (streak >= 7 && unlock("streak_7")) newly.add(byId("streak_7"))
         if (streak >= 21 && unlock("streak_21")) newly.add(byId("streak_21"))
+        if (streak >= 30 && unlock("streak_30")) newly.add(byId("streak_30"))
         if (streak >= 100 && unlock("streak_100")) newly.add(byId("streak_100"))
         return newly
     }
@@ -80,7 +86,11 @@ class AchievementManager(context: Context) {
 
     fun checkShopBuyer(): List<Achievement> {
         val newly = mutableListOf<Achievement>()
+        val count = prefs.getInt("shop_purchases", 0) + 1
+        prefs.edit().putInt("shop_purchases", count).apply()
+
         if (unlock("shop_buyer")) newly.add(byId("shop_buyer"))
+        if (count >= 10 && unlock("shop_10")) newly.add(byId("shop_10"))
         return newly
     }
 
@@ -99,7 +109,6 @@ class AchievementManager(context: Context) {
     fun checkChallengeAchievements(challengeType: String): List<Achievement> {
         val newly = mutableListOf<Achievement>()
 
-        // 1. Contar desafío específico
         val key = "count_$challengeType"
         val count = prefs.getInt(key, 0) + 1
         prefs.edit().putInt(key, count).apply()
@@ -108,15 +117,13 @@ class AchievementManager(context: Context) {
         if (challengeType == "TEXT" && count >= 10 && unlock("text_10")) newly.add(byId("text_10"))
         if (challengeType == "TRACING" && count >= 10 && unlock("tracing_10")) newly.add(byId("tracing_10"))
 
-        // 2. Contar tipos únicos usados (para "En la variedad...")
-        val uniqueKey = "unique_games_$challengeType"
-        if (!prefs.getBoolean(uniqueKey, false)) {
-            prefs.edit().putBoolean(uniqueKey, true).apply()
-            val uniqueCount = prefs.getInt("count_unique_games", 0) + 1
-            prefs.edit().putInt("count_unique_games", uniqueCount).apply()
-            if (uniqueCount >= 5 && unlock("all_games")) newly.add(byId("all_games"))
-        }
+        return newly
+    }
 
+    fun checkMultiRoundAchievements(rounds: Int): List<Achievement> {
+        val newly = mutableListOf<Achievement>()
+        if (rounds >= 5 && unlock("rounds_5")) newly.add(byId("rounds_5"))
+        if (rounds >= 10 && unlock("rounds_10")) newly.add(byId("rounds_10"))
         return newly
     }
 
