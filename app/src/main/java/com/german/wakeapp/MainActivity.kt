@@ -72,6 +72,7 @@ val CleanSurfaceVariant = Color(0xFF262626)
 val CleanText = Color(0xFFFFFFFF)
 val CleanTextDim = Color(0xFF888888)
 val WakeBlue = Color(0xFF1D9BF0)
+val WakeRed = Color(0xFFFF5252)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,7 +99,19 @@ class MainActivity : ComponentActivity() {
         setContent {
             WakeAppTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = CleanBg) {
-                    MainScreen()
+                    // Lógica para ver si mostrar el onboarding o la app principal
+                    val context = LocalContext.current
+                    val settingsManager = remember { SettingsManager(context) }
+                    var isOnboarded by remember { mutableStateOf(settingsManager.isOnboardingCompleted()) }
+
+                    if (!isOnboarded) {
+                        OnboardingScreen(
+                            settingsManager = settingsManager,
+                            onComplete = { isOnboarded = true }
+                        )
+                    } else {
+                        MainScreen()
+                    }
                 }
             }
         }
@@ -110,13 +123,14 @@ data class AlarmItem(
     val hour: Int,
     val minute: Int,
     var isEnabled: Boolean = true,
-    val challengeType: String = "MATH",
+    val challengeTypes: List<String> = listOf("MATH"),
     val difficulty: String = "MEDIUM",
     val rounds: Int = 1,
     val xpBoost: Boolean = false,
     val soundUri: String? = null,
     val soundName: String? = null,
-    val colorHex: String = "DEFAULT"
+    val colorHex: String = "DEFAULT",
+    val label: String? = null
 )
 
 data class RewardInfo(
@@ -130,31 +144,12 @@ data class RewardInfo(
 )
 
 fun challengeAccent(type: String): Color = CleanText
-
-fun challengeEmoji(type: String): String = when (type) {
-    "MATH" -> "∑"
-    "TEXT" -> "✎"
-    "TRACING" -> "⌖"
-    else -> "⏰"
-}
-
-fun challengeTitle(type: String): String = when (type) {
-    "MATH" -> "Matemáticas"
-    "TEXT" -> "Frase Exacta"
-    "TRACING" -> "Delineado"
-    else -> "Desafío"
-}
+fun challengeEmoji(type: String): String = ChallengeCatalog.byId(type).emoji
+fun challengeTitle(type: String): String = ChallengeCatalog.label(type)
 
 fun getAlarmColor(colorHex: String, defaultAccent: Color): Color {
     return when (colorHex) {
-        "RED" -> Color(0xFFFF5252)
-        "BLUE" -> WakeBlue
-        "GREEN" -> Color(0xFF00E676)
-        "PURPLE" -> Color(0xFFE040FB)
-        "ORANGE" -> Color(0xFFFF9800)
-        "YELLOW" -> Color(0xFFFFEB3B)
-        "PINK" -> Color(0xFFFF4081)
-        "CYAN" -> Color(0xFF00E5FF)
+        "RED" -> WakeRed
         else -> WakeBlue
     }
 }
@@ -195,32 +190,26 @@ fun AnimatedBackground() {
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
-
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.55f)))
     }
 }
 
 @Composable
 fun MainHeader(
-    streak: Int,
-    points: Int,
     level: Int,
     xp: Int,
-    isFrozen: Boolean,
-    freezeRemainingMillis: Long,
     readingMode: Boolean,
+    userName: String,
     onToggleReading: () -> Unit,
     onInfoClick: () -> Unit,
     onRewardsClick: () -> Unit,
     onStreakClick: () -> Unit,
-    onSettingsClick: () -> Unit
+    onProfileClick: () -> Unit
 ) {
     val xpNeeded = StreakManager.xpForLevel(level)
     val xpProgress = (xp.toFloat() / xpNeeded).coerceIn(0f, 1f)
-
-    val hours = (freezeRemainingMillis / (1000 * 60 * 60)) % 24
-    val minutes = (freezeRemainingMillis / (1000 * 60)) % 60
-    val timeText = String.format("%02d:%02d", hours, minutes)
 
     Column(
         modifier = Modifier
@@ -229,99 +218,120 @@ fun MainHeader(
             .statusBarsPadding()
             .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        // --- ZONA SUPERIOR ---
+        Box(
+            modifier = Modifier.fillMaxWidth().height(120.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onInfoClick() }) {
+            // IZQUIERDA: Saludo con el nombre
+            Column(
+                modifier = Modifier.align(Alignment.CenterStart),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "Hola,",
+                    fontSize = 14.sp,
+                    color = CleanTextDim,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = userName.ifBlank { "Madrugador" },
+                    fontSize = 20.sp,
+                    color = CleanText,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // CENTRO: Logo y WakeApp
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.clickable { onProfileClick() }
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.img_icon_info),
+                    contentDescription = "Logo",
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "WakeApp",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp,
+                    color = CleanText
+                )
+            }
+
+            // DERECHA: Calendario y Luna (Apilados)
+            Column(
+                modifier = Modifier.align(Alignment.CenterEnd),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Calendario (Arriba)
                 Box(
-                    modifier = Modifier.size(40.dp).clip(CircleShape).background(CleanSurface),
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(CleanSurface)
+                        .clickable { onStreakClick() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.img_icon_info),
-                        contentDescription = "Información",
-                        modifier = Modifier.size(24.dp).clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Text("WakeApp", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = CleanText)
-            }
-
-            // BOTÓN DE MODO LECTURA CON LUNA VECTORIAL
-            Box(
-                modifier = Modifier.size(40.dp).clip(CircleShape).background(if (readingMode) WakeBlue else CleanSurface).clickable { onToggleReading() },
-                contentAlignment = Alignment.Center
-            ) {
-                Canvas(modifier = Modifier.size(18.dp)) {
-                    val w = size.width; val h = size.height
-                    val path = Path().apply {
-                        moveTo(w * 0.8f, h * 0.1f)
-                        cubicTo(w * 0.2f, h * 0.1f, w * 0.1f, h * 0.9f, w * 0.8f, h * 0.9f)
-                        cubicTo(w * 0.3f, h * 0.9f, w * 0.3f, h * 0.1f, w * 0.8f, h * 0.1f)
-                    }
-                    drawPath(path, color = CleanText, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-
-            // BOTÓN DE CALENDARIO ("CALENDARIO")
-            Row(
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(CleanSurface.copy(alpha = 0.9f)).clickable { onStreakClick() }.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Canvas(modifier = Modifier.size(24.dp)) {
-                    val w = size.width; val h = size.height; val s = 1.5.dp.toPx()
-                    drawRoundRect(color = CleanText, topLeft = Offset(w*0.1f, h*0.2f), size = Size(w*0.8f, h*0.75f), cornerRadius = CornerRadius(4.dp.toPx()), style = Stroke(width = s))
-                    drawLine(color = CleanText, start = Offset(w*0.1f, h*0.4f), end = Offset(w*0.9f, h*0.4f), strokeWidth = s)
-                    drawLine(color = CleanText, start = Offset(w*0.3f, h*0.1f), end = Offset(w*0.3f, h*0.3f), strokeWidth = s, cap = StrokeCap.Round)
-                    drawLine(color = CleanText, start = Offset(w*0.7f, h*0.1f), end = Offset(w*0.7f, h*0.3f), strokeWidth = s, cap = StrokeCap.Round)
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text("Calendario", fontWeight = FontWeight.Bold, color = CleanText, fontSize = 15.sp)
-                    if (isFrozen) {
-                        Text("Congelada ($timeText)", fontWeight = FontWeight.SemiBold, color = WakeBlue, fontSize = 12.sp)
+                    Canvas(modifier = Modifier.size(22.dp)) {
+                        val w = size.width; val h = size.height; val s = 1.5.dp.toPx()
+                        drawRoundRect(color = CleanText, topLeft = Offset(w*0.1f, h*0.2f), size = Size(w*0.8f, h*0.75f), cornerRadius = CornerRadius(4.dp.toPx()), style = Stroke(width = s))
+                        drawLine(color = CleanText, start = Offset(w*0.1f, h*0.4f), end = Offset(w*0.9f, h*0.4f), strokeWidth = s)
+                        drawLine(color = CleanText, start = Offset(w*0.3f, h*0.1f), end = Offset(w*0.3f, h*0.3f), strokeWidth = s, cap = StrokeCap.Round)
+                        drawLine(color = CleanText, start = Offset(w*0.7f, h*0.1f), end = Offset(w*0.7f, h*0.3f), strokeWidth = s, cap = StrokeCap.Round)
                     }
                 }
-            }
 
-            // BLOQUE DE PUNTOS
-            Row(
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(CleanSurface.copy(alpha = 0.9f)).padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Canvas(modifier = Modifier.size(24.dp)) {
-                    val w = size.width; val h = size.height; val s = 1.5.dp.toPx()
-                    drawCircle(color = CleanText, radius = w*0.4f, style = Stroke(width = s))
-                    drawLine(color = CleanText, start = Offset(w*0.5f, h*0.25f), end = Offset(w*0.5f, h*0.75f), strokeWidth = s, cap = StrokeCap.Round)
-                    drawLine(color = CleanText, start = Offset(w*0.4f, h*0.4f), end = Offset(w*0.6f, h*0.4f), strokeWidth = s, cap = StrokeCap.Round)
-                    drawLine(color = CleanText, start = Offset(w*0.4f, h*0.6f), end = Offset(w*0.6f, h*0.6f), strokeWidth = s, cap = StrokeCap.Round)
+                // Modo Lectura (Abajo)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(if (readingMode) WakeBlue else CleanSurface)
+                        .clickable { onToggleReading() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(20.dp)) {
+                        val w = size.width; val h = size.height
+                        val path = Path().apply {
+                            moveTo(w * 0.6f, h * 0.1f)
+                            cubicTo(w * 0.2f, h * 0.2f, w * 0.2f, h * 0.8f, w * 0.6f, h * 0.9f)
+                            cubicTo(w * 0.3f, h * 0.7f, w * 0.3f, h * 0.3f, w * 0.6f, h * 0.1f)
+                        }
+                        drawPath(path, color = CleanText, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    }
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Text("$points", fontWeight = FontWeight.Bold, color = CleanText, fontSize = 18.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // --- BARRA DE NIVEL Y RECOMPENSAS ---
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Nivel $level", fontSize = 12.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.width(12.dp))
             LinearProgressIndicator(
                 progress = { xpProgress },
-                modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
                 color = CleanText,
                 trackColor = CleanSurfaceVariant
             )
             Spacer(modifier = Modifier.width(12.dp))
-            Box(modifier = Modifier.clickable { onRewardsClick() }) { Text("Recompensas", fontSize = 12.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold) }
+            Box(modifier = Modifier.clickable { onRewardsClick() }) {
+                Text("Recompensas", fontSize = 12.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
@@ -341,17 +351,19 @@ fun MainScreen() {
     var currentXp by remember { mutableIntStateOf(streakManager.getXp()) }
     var alarms by remember { mutableStateOf(alarmRepository.loadAll()) }
 
+    // Obtener el nombre de usuario
+    val userName = remember { settingsManager.getUserName() }
+
     var showTimePicker by remember { mutableStateOf(false) }
     var editingAlarm by remember { mutableStateOf<AlarmItem?>(null) }
     var showInfoDialog by remember { mutableStateOf(false) }
     var showRewardsDialog by remember { mutableStateOf(false) }
     var showStreakCalendar by remember { mutableStateOf(false) }
-
-    // Alerta de límite de alarmas
     var showAlarmLimitDialog by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
 
     var selectedChallengeType by remember { mutableStateOf("MATH") }
-    var selectedDifficulty by remember { mutableStateOf("MEDIUM") }
+    var selectedDifficulty by remember { mutableStateOf(settingsManager.getDefaultDifficulty()) } // NUEVO: Dificultad por defecto
     var selectedRounds by remember { mutableIntStateOf(1) }
     var selectedColor by remember { mutableStateOf("DEFAULT") }
     var pendingSoundUri by remember { mutableStateOf<String?>(null) }
@@ -366,10 +378,6 @@ fun MainScreen() {
         activity?.window?.let { readingModeManager.applyToWindow(it, readingMode) }
     }
 
-    var isFrozen by remember { mutableStateOf(streakManager.isStreakFrozen()) }
-    var freezeInventory by remember { mutableIntStateOf(streakManager.getInventoryCount("freeze")) }
-    var freezeRemaining by remember { mutableLongStateOf(streakManager.getFreezeRemainingMillis()) }
-
     LaunchedEffect(Unit) {
         alarms.filter { it.isEnabled }.forEach { scheduleAlarm(context, it) }
     }
@@ -378,22 +386,12 @@ fun MainScreen() {
         alarmRepository.saveAll(alarms)
     }
 
-    LaunchedEffect(isFrozen) {
-        while (isFrozen) {
-            freezeRemaining = streakManager.getFreezeRemainingMillis()
-            if (freezeRemaining <= 0) {
-                isFrozen = false
-                break
-            }
-            delay(1000L)
-        }
-    }
-
     LaunchedEffect(Unit) {
         AlarmStateHolder.restoreIfNeeded(context)
         if (AlarmStateHolder.isRinging) {
             val intent = Intent(context, ChallengeActivity::class.java).apply {
-                putExtra("CHALLENGE_TYPE", AlarmStateHolder.lastChallengeType)
+                putStringArrayListExtra("CHALLENGE_TYPES", ArrayList(AlarmStateHolder.lastChallengeTypes))
+                putExtra("CHALLENGE_TYPE", AlarmStateHolder.lastChallengeTypes.firstOrNull() ?: "MATH")
                 putExtra("DIFFICULTY", AlarmStateHolder.lastDifficulty)
                 putExtra("ROUNDS", AlarmStateHolder.lastRounds)
                 putExtra("XP_BOOST", AlarmStateHolder.lastXpBoost)
@@ -411,7 +409,8 @@ fun MainScreen() {
                 AlarmStateHolder.restoreIfNeeded(context)
                 if (AlarmStateHolder.isRinging) {
                     val intent = Intent(context, ChallengeActivity::class.java).apply {
-                        putExtra("CHALLENGE_TYPE", AlarmStateHolder.lastChallengeType)
+                        putStringArrayListExtra("CHALLENGE_TYPES", ArrayList(AlarmStateHolder.lastChallengeTypes))
+                        putExtra("CHALLENGE_TYPE", AlarmStateHolder.lastChallengeTypes.firstOrNull() ?: "MATH")
                         putExtra("DIFFICULTY", AlarmStateHolder.lastDifficulty)
                         putExtra("ROUNDS", AlarmStateHolder.lastRounds)
                         putExtra("XP_BOOST", AlarmStateHolder.lastXpBoost)
@@ -421,13 +420,10 @@ fun MainScreen() {
                     context.startActivity(intent)
                 }
 
-                streakManager.checkStreakExpiration()
                 currentStreak = streakManager.getStreak()
                 points = streakManager.getPoints()
                 currentLevel = streakManager.getLevel()
                 currentXp = streakManager.getXp()
-                isFrozen = streakManager.isStreakFrozen()
-                freezeInventory = streakManager.getInventoryCount("freeze")
                 readingMode = readingModeManager.isEnabled()
 
                 achievementManager.checkPointsAchievement(points).let { newAch ->
@@ -464,7 +460,9 @@ fun MainScreen() {
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(CleanBg)) {
+    Box(modifier = Modifier
+        .fillMaxSize()
+        .background(CleanBg)) {
         if (currentSection != AppSection.SETTINGS) {
             AnimatedBackground()
         }
@@ -473,9 +471,10 @@ fun MainScreen() {
             containerColor = Color.Transparent,
             topBar = {
                 MainHeader(
-                    streak = currentStreak, points = points, level = currentLevel, xp = currentXp, isFrozen = isFrozen,
-                    freezeRemainingMillis = freezeRemaining,
+                    level = currentLevel,
+                    xp = currentXp,
                     readingMode = readingMode,
+                    userName = userName,
                     onToggleReading = {
                         readingMode = !readingMode
                         readingModeManager.setEnabled(readingMode)
@@ -483,7 +482,7 @@ fun MainScreen() {
                     onInfoClick = { showInfoDialog = true },
                     onRewardsClick = { showRewardsDialog = true },
                     onStreakClick = { showStreakCalendar = true },
-                    onSettingsClick = { currentSection = AppSection.SETTINGS }
+                    onProfileClick = { showProfileDialog = true }
                 )
             },
             bottomBar = { WakeBottomBar(current = currentSection, onSelect = { currentSection = it }) },
@@ -491,14 +490,16 @@ fun MainScreen() {
                 if (currentSection == AppSection.ALARMS) {
                     FloatingActionButton(
                         onClick = {
-                            // LÍMITE DE 4 ALARMAS
                             if (alarms.size >= 4 && !streakManager.hasInfiniteAlarms()) {
                                 showAlarmLimitDialog = true
                             } else {
                                 pendingSoundUri = null
                                 pendingSoundName = null
                                 selectedRounds = 1
+                                selectedChallengeType = "MATH"
                                 selectedColor = "DEFAULT"
+                                // NUEVO: Aplicar la dificultad por defecto guardada en el onboarding
+                                selectedDifficulty = settingsManager.getDefaultDifficulty()
                                 showTimePicker = true
                             }
                         },
@@ -513,7 +514,9 @@ fun MainScreen() {
             },
             floatingActionButtonPosition = FabPosition.Start
         ) { paddingValues ->
-            Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            Box(modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)) {
                 AnimatedContent(
                     targetState = currentSection,
                     transitionSpec = { fadeIn(animationSpec = tween(200)) togetherWith fadeOut(animationSpec = tween(200)) },
@@ -550,23 +553,27 @@ fun MainScreen() {
 
                 if (showTimePicker) {
                     CustomTimePickerDialog(
+                        // NUEVO: Pasar la hora habitual guardada en el onboarding
+                        initialHour = settingsManager.getHabitualWakeHour(),
+                        initialMinute = settingsManager.getHabitualWakeMinute(),
                         onDismiss = { showTimePicker = false },
-                        onConfirm = { hour, minute ->
+                        onConfirm = { hour, minute, label ->
+                            val finalTypes = List(selectedRounds) { selectedChallengeType }
                             val newAlarm = AlarmItem(
                                 hour = hour, minute = minute, isEnabled = true,
-                                challengeType = selectedChallengeType, difficulty = selectedDifficulty,
-                                rounds = selectedRounds,
+                                challengeTypes = finalTypes,
+                                difficulty = selectedDifficulty,
+                                rounds = finalTypes.size,
                                 soundUri = pendingSoundUri, soundName = pendingSoundName,
-                                colorHex = selectedColor
+                                colorHex = selectedColor,
+                                label = label
                             )
                             alarms = (alarms + newAlarm).sortedBy { it.hour * 60 + it.minute }
                             scheduleAlarm(context, newAlarm)
                             showTimePicker = false; pendingSoundUri = null; pendingSoundName = null
                         },
-                        selectedChallengeType = selectedChallengeType, onChallengeTypeSelected = {
-                            selectedChallengeType = it
-                            selectedRounds = 1
-                        },
+                        selectedChallengeType = selectedChallengeType,
+                        onChallengeTypeSelected = { selectedChallengeType = it },
                         selectedDifficulty = selectedDifficulty, onDifficultySelected = { selectedDifficulty = it },
                         selectedRounds = selectedRounds, onRoundsChange = { selectedRounds = it },
                         soundName = pendingSoundName,
@@ -603,7 +610,6 @@ fun MainScreen() {
                     StreakCalendarDialog(streak = currentStreak, onDismiss = { showStreakCalendar = false })
                 }
 
-                // Alert Dialog del límite
                 if (showAlarmLimitDialog) {
                     AlertDialog(
                         onDismissRequest = { showAlarmLimitDialog = false },
@@ -629,6 +635,20 @@ fun MainScreen() {
                     )
                 }
 
+                if (showProfileDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showProfileDialog = false },
+                        containerColor = CleanSurface,
+                        title = { Text("Perfil", color = CleanText, fontWeight = FontWeight.Bold) },
+                        text = { Text("Próximamente...", color = CleanTextDim, fontSize = 16.sp) },
+                        confirmButton = {
+                            TextButton(onClick = { showProfileDialog = false }) {
+                                Text("Entendido", color = WakeBlue, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    )
+                }
+
                 rewardDialog?.let { info ->
                     if (info.achievements.isNotEmpty()) {
                         AchievementUnlockedOverlay(
@@ -648,7 +668,14 @@ fun MainScreen() {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Brush.verticalGradient(listOf(Color(0x33FF6600), Color(0x22FF8800))))
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color(0x33FF6600),
+                                        Color(0x22FF8800)
+                                    )
+                                )
+                            )
                     )
                 }
             }
@@ -668,6 +695,8 @@ fun EditAlarmDialog(
     var minute by remember { mutableIntStateOf(alarm.minute) }
     var color by remember { mutableStateOf(alarm.colorHex) }
     var rounds by remember { mutableIntStateOf(alarm.rounds) }
+    var label by remember { mutableStateOf(alarm.label ?: "") }
+    var selectedType by remember { mutableStateOf(alarm.challengeTypes.firstOrNull() ?: "MATH") }
 
     val maxRounds = if (streakManager.hasExtraRounds()) 10 else 4
 
@@ -677,10 +706,19 @@ fun EditAlarmDialog(
             shape = RoundedCornerShape(28.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("Editar Alarma", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = CleanText)
-                    Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(CleanSurfaceVariant).clickable { onDismiss() }, contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(CleanSurfaceVariant)
+                        .clickable { onDismiss() }, contentAlignment = Alignment.Center) {
                         Text("✕", color = CleanTextDim, fontSize = 16.sp)
                     }
                 }
@@ -691,6 +729,44 @@ fun EditAlarmDialog(
                     NumberPicker(value = hour, range = 0..23, onValueChange = { hour = it })
                     Text(":", fontSize = 32.sp, fontWeight = FontWeight.Light, color = CleanText, modifier = Modifier.padding(horizontal = 8.dp))
                     NumberPicker(value = minute, range = 0..59, onValueChange = { minute = it })
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text("¿Para qué es esta alarma?") },
+                    placeholder = { Text("Trabajo, Instituto, Gym...", color = CleanTextDim) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = WakeBlue,
+                        unfocusedBorderColor = CleanSurfaceVariant,
+                        focusedTextColor = CleanText,
+                        unfocusedTextColor = CleanText,
+                        focusedLabelColor = WakeBlue,
+                        unfocusedLabelColor = CleanTextDim,
+                        cursorColor = WakeBlue
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text("Minijuego", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(ChallengeCatalog.all) { type ->
+                        val isSelected = selectedType == type.id
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedType = type.id },
+                            label = { Text("${type.emoji} ${type.label}", fontSize = 14.sp, fontWeight = FontWeight.Medium) },
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = WakeBlue, selectedLabelColor = CleanText, containerColor = CleanSurfaceVariant, labelColor = CleanText),
+                            border = null
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -719,11 +795,7 @@ fun EditAlarmDialog(
                 Text("Color", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
                 Spacer(modifier = Modifier.height(12.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    val colors = if (streakManager.hasExtraColors()) {
-                        listOf("DEFAULT" to WakeBlue, "RED" to Color(0xFFFF5252), "GREEN" to Color(0xFF00E676), "PURPLE" to Color(0xFFE040FB), "ORANGE" to Color(0xFFFF9800), "YELLOW" to Color(0xFFFFEB3B), "PINK" to Color(0xFFFF4081), "CYAN" to Color(0xFF00E5FF))
-                    } else {
-                        listOf("DEFAULT" to WakeBlue, "RED" to Color(0xFFFF5252), "BLUE" to Color(0xFF448AFF))
-                    }
+                    val colors = listOf("DEFAULT" to WakeBlue, "RED" to WakeRed)
                     items(colors) { (hex, c) ->
                         val isSelected = color == hex
                         Box(
@@ -740,8 +812,17 @@ fun EditAlarmDialog(
                 Spacer(modifier = Modifier.height(32.dp))
 
                 Button(
-                    onClick = { onSave(alarm.copy(hour = hour, minute = minute, colorHex = color, rounds = rounds)) },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    onClick = {
+                        val finalTypes = List(rounds) { selectedType }
+                        onSave(alarm.copy(
+                            hour = hour, minute = minute, colorHex = color,
+                            challengeTypes = finalTypes, rounds = finalTypes.size,
+                            label = label.trim().ifBlank { null }
+                        ))
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = WakeBlue),
                     shape = RoundedCornerShape(16.dp)
                 ) {
@@ -752,9 +833,11 @@ fun EditAlarmDialog(
 
                 TextButton(
                     onClick = { onDelete() },
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
                 ) {
-                    Text("Eliminar Alarma", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Eliminar Alarma", color = WakeRed, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }
@@ -769,9 +852,13 @@ fun LevelRewardsDialog(onDismiss: () -> Unit) {
         title = { Text("Recompensas de Nivel", color = CleanText, fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                Text("Cada vez que subas de nivel superando desafíos, obtendrás recompensas directas:", fontSize = 14.sp, color = CleanTextDim)
+                Text("Sube de nivel completando desafíos para ganar recompensas directas. Las monedas (🪙) solo se obtienen al desbloquear Logros:", fontSize = 14.sp, color = CleanTextDim)
                 Spacer(modifier = Modifier.height(16.dp))
-                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(CleanSurfaceVariant).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(CleanSurfaceVariant)
+                    .padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("⚡", fontSize = 24.sp)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
@@ -788,7 +875,11 @@ fun LevelRewardsDialog(onDismiss: () -> Unit) {
 @Composable
 fun XpRewardDialog(info: RewardInfo, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = { /* bloquea cierre */ }) {
-        Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(CleanSurface).padding(32.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(CleanSurface)
+            .padding(32.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(text = if (info.levelUp) "🎉" else "⭐", fontSize = 64.sp)
                 Spacer(modifier = Modifier.height(16.dp))
@@ -796,7 +887,9 @@ fun XpRewardDialog(info: RewardInfo, onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("+${info.xpGained} XP", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = WakeBlue)
                 Spacer(modifier = Modifier.height(32.dp))
-                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(16.dp)) {
+                Button(onClick = onDismiss, modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(16.dp)) {
                     Text("Continuar", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
@@ -821,7 +914,10 @@ fun WakeBottomBar(current: AppSection, onSelect: (AppSection) -> Unit) {
                 val stroke = if (selected) 2.5.dp else 1.5.dp
 
                 Column(
-                    modifier = Modifier.weight(1f).fillMaxHeight().clickable { onSelect(section) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { onSelect(section) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -848,7 +944,6 @@ fun WakeBottomBar(current: AppSection, onSelect: (AppSection) -> Unit) {
                                 drawArc(color = color, startAngle = 180f, sweepAngle = 180f, useCenter = false, topLeft = Offset(w*0.3f, h*0.1f), size = Size(w*0.4f, h*0.4f), style = Stroke(width = s, cap = StrokeCap.Round))
                             }
                             AppSection.SETTINGS -> {
-                                // ENGRANAJE PERFECTO VECTORIAL
                                 val center = Offset(w/2, h/2)
                                 val rOuter = w * 0.45f
                                 val rInner = w * 0.25f
@@ -890,7 +985,9 @@ fun AlarmsSection(
         EmptyState()
     } else {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(bottom = 100.dp)
         ) {
@@ -909,7 +1006,9 @@ fun AlarmsSection(
 @Composable
 fun EmptyState() {
     Column(
-        modifier = Modifier.fillMaxSize().padding(bottom = 80.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = 80.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -926,15 +1025,28 @@ fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Uni
     val accentColor = getAlarmColor(alarm.colorHex, WakeBlue)
     val timeFormatted = String.format("%02d:%02d", alarm.hour, alarm.minute)
 
+    val typeLabel = remember(alarm.challengeTypes) {
+        challengeTitle(alarm.challengeTypes.firstOrNull() ?: "MATH")
+    }
+
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = CleanSurface.copy(alpha = 0.95f)),
         shape = RoundedCornerShape(20.dp)
     ) {
-        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            Box(modifier = Modifier.width(6.dp).fillMaxHeight().background(accentColor))
+        Row(modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)) {
+            Box(modifier = Modifier
+                .width(6.dp)
+                .fillMaxHeight()
+                .background(accentColor))
 
-            Row(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = timeFormatted,
@@ -947,7 +1059,7 @@ fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Uni
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${challengeTitle(alarm.challengeType)} · ${alarm.difficulty}",
+                            "$typeLabel · ${alarm.difficulty}",
                             fontSize = 13.sp,
                             color = CleanTextDim,
                             fontWeight = FontWeight.Medium
@@ -955,6 +1067,11 @@ fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Uni
                         if (alarm.rounds > 1) {
                             Text(" · ${alarm.rounds} rondas", fontSize = 13.sp, color = CleanTextDim)
                         }
+                    }
+
+                    if (!alarm.label.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("🏷 ${alarm.label}", fontSize = 13.sp, color = accentColor, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
 
                     if (!alarm.soundName.isNullOrBlank()) {
@@ -975,7 +1092,10 @@ fun AlarmCard(alarm: AlarmItem, onToggle: (Boolean) -> Unit, onDelete: () -> Uni
                         )
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Box(modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onDelete() }, contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable { onDelete() }, contentAlignment = Alignment.Center) {
                         Text("🗑", fontSize = 18.sp)
                     }
                 }
@@ -990,7 +1110,10 @@ fun ProgressSection(context: Context, streak: Int, points: Int, level: Int, xp: 
     val unlockedCount = achievementManager.unlockedCount()
     val xpNeeded = StreakManager.xpForLevel(level)
 
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+    Column(modifier = Modifier
+        .fillMaxSize()
+        .verticalScroll(rememberScrollState())
+        .padding(24.dp)) {
         Text("Tu Progreso", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText)
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -1000,7 +1123,7 @@ fun ProgressSection(context: Context, streak: Int, points: Int, level: Int, xp: 
                 HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
                 ProfileStatRow("XP", "$xp / $xpNeeded")
                 HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-                ProfileStatRow("Racha Activa", "$streak Días")
+                ProfileStatRow("Días Distintos", "$streak días")
                 HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
                 ProfileStatRow("Puntos de Energía", "$points")
             }
@@ -1028,7 +1151,11 @@ fun ProfileStatRow(label: String, value: String) {
 
 @Composable
 fun AchievementRow(achievement: Achievement, unlocked: Boolean, progress: Int) {
-    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CleanSurface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(16.dp))
+        .background(CleanSurface)
+        .padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(achievement.emoji, fontSize = 24.sp, modifier = Modifier.width(40.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(achievement.title, color = if (unlocked) CleanText else CleanTextDim, fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -1055,7 +1182,9 @@ fun InfoDialog(onDismiss: () -> Unit) {
 
 @Composable
 fun CustomTimePickerDialog(
-    onDismiss: () -> Unit, onConfirm: (Int, Int) -> Unit,
+    initialHour: Int,
+    initialMinute: Int,
+    onDismiss: () -> Unit, onConfirm: (Int, Int, String?) -> Unit,
     selectedChallengeType: String, onChallengeTypeSelected: (String) -> Unit,
     selectedDifficulty: String, onDifficultySelected: (String) -> Unit,
     selectedRounds: Int, onRoundsChange: (Int) -> Unit,
@@ -1063,8 +1192,9 @@ fun CustomTimePickerDialog(
     selectedColor: String, onColorSelected: (String) -> Unit,
     streakManager: StreakManager
 ) {
-    var selectedHour by remember { mutableIntStateOf(7) }
-    var selectedMinute by remember { mutableIntStateOf(0) }
+    var selectedHour by remember { mutableIntStateOf(initialHour) }
+    var selectedMinute by remember { mutableIntStateOf(initialMinute) }
+    var alarmLabel by remember { mutableStateOf("") }
     val maxRounds = if (streakManager.hasExtraRounds()) 10 else 4
 
     AlertDialog(
@@ -1080,30 +1210,60 @@ fun CustomTimePickerDialog(
                     NumberPicker(value = selectedMinute, range = 0..59, step = 1, onValueChange = { selectedMinute = it })
                 }
 
+                Spacer(modifier = Modifier.height(20.dp))
+
+                OutlinedTextField(
+                    value = alarmLabel,
+                    onValueChange = { alarmLabel = it },
+                    label = { Text("¿Para qué es esta alarma?") },
+                    placeholder = { Text("Trabajo, Instituto, Gym...", color = CleanTextDim) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = WakeBlue,
+                        unfocusedBorderColor = CleanSurfaceVariant,
+                        focusedTextColor = CleanText,
+                        unfocusedTextColor = CleanText,
+                        focusedLabelColor = WakeBlue,
+                        unfocusedLabelColor = CleanTextDim,
+                        cursorColor = WakeBlue
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Text("Color de la Alarma", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
                 Spacer(modifier = Modifier.height(12.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    val colors = if (streakManager.hasExtraColors()) {
-                        listOf("DEFAULT" to WakeBlue, "RED" to Color(0xFFFF5252), "GREEN" to Color(0xFF00E676), "PURPLE" to Color(0xFFE040FB), "ORANGE" to Color(0xFFFF9800), "YELLOW" to Color(0xFFFFEB3B), "PINK" to Color(0xFFFF4081), "CYAN" to Color(0xFF00E5FF))
-                    } else {
-                        listOf("DEFAULT" to WakeBlue, "RED" to Color(0xFFFF5252), "BLUE" to Color(0xFF448AFF))
-                    }
+                    val colors = listOf("DEFAULT" to WakeBlue, "RED" to WakeRed)
                     items(colors) { (hex, color) ->
                         val isSelected = selectedColor == hex
-                        Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(color).border(if (isSelected) 4.dp else 0.dp, if (isSelected) CleanText else Color.Transparent, CircleShape).clickable { onColorSelected(hex) })
+                        Box(modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                            .border(
+                                if (isSelected) 4.dp else 0.dp,
+                                if (isSelected) CleanText else Color.Transparent,
+                                CircleShape
+                            )
+                            .clickable { onColorSelected(hex) })
                     }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
-                Text("Tipo de Desafío", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
-                Spacer(modifier = Modifier.height(12.dp))
+
+                Text("Minijuego", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                Spacer(modifier = Modifier.height(8.dp))
+
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(listOf("MATH" to "Cálculo", "TEXT" to "Frase", "TRACING" to "Delinear")) { (type, label) ->
+                    items(ChallengeCatalog.all) { type ->
+                        val isSelected = selectedChallengeType == type.id
                         FilterChip(
-                            selected = selectedChallengeType == type, onClick = { onChallengeTypeSelected(type) },
-                            label = { Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium) },
+                            selected = isSelected,
+                            onClick = { onChallengeTypeSelected(type.id) },
+                            label = { Text("${type.emoji} ${type.label}", fontSize = 14.sp, fontWeight = FontWeight.Medium) },
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = WakeBlue, selectedLabelColor = CleanText, containerColor = CleanSurfaceVariant, labelColor = CleanText),
                             border = null
                         )
@@ -1144,17 +1304,25 @@ fun CustomTimePickerDialog(
                     Text("Sonido", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(CleanSurfaceVariant).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(CleanSurfaceVariant)
+                    .padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (soundName != null) "🎵" else "🔔", fontSize = 20.sp)
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(soundName ?: "Predeterminado", fontSize = 15.sp, color = CleanText, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (soundName != null) {
-                        Box(modifier = Modifier.size(24.dp).clickable { onClearSound() }, contentAlignment = Alignment.Center) { Text("✕", color = CleanTextDim, fontSize = 14.sp) }
+                        Box(modifier = Modifier
+                            .size(24.dp)
+                            .clickable { onClearSound() }, contentAlignment = Alignment.Center) { Text("✕", color = CleanTextDim, fontSize = 14.sp) }
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
-                    onClick = onPickSound, modifier = Modifier.fillMaxWidth().height(48.dp),
+                    onClick = onPickSound, modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = CleanSurfaceVariant), shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("Elegir archivo de audio", color = CleanText, fontSize = 14.sp)
@@ -1162,7 +1330,13 @@ fun CustomTimePickerDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(selectedHour, selectedMinute) }, colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(12.dp)) {
+            Button(
+                onClick = {
+                    onConfirm(selectedHour, selectedMinute, alarmLabel.trim().ifBlank { null })
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = WakeBlue),
+                shape = RoundedCornerShape(12.dp)
+            ) {
                 Text("Guardar Alarma", fontWeight = FontWeight.Bold, color = CleanText)
             }
         },
@@ -1192,7 +1366,9 @@ fun NumberPicker(value: Int, range: IntRange, step: Int = 1, onValueChange: (Int
         }
     }
 
-    Box(modifier = Modifier.height(boxHeight).width(80.dp), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier
+        .height(boxHeight)
+        .width(80.dp), contentAlignment = Alignment.Center) {
         LazyColumn(
             state = listState, horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = verticalPadding),
@@ -1200,7 +1376,9 @@ fun NumberPicker(value: Int, range: IntRange, step: Int = 1, onValueChange: (Int
         ) {
             items(items) { item ->
                 val isSelected = item == value
-                Box(modifier = Modifier.height(itemHeight).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier
+                    .height(itemHeight)
+                    .fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(
                         text = String.format("%02d", item),
                         fontSize = if (isSelected) 32.sp else 20.sp,
@@ -1231,7 +1409,11 @@ fun AchievementUnlockedOverlay(info: RewardInfo, onDismiss: () -> Unit) {
     val current = queue.firstOrNull()
     if (current == null) { LaunchedEffect(Unit) { onDismiss() }; return }
     Dialog(onDismissRequest = { /* bloquea cierre */ }) {
-        Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(CleanSurface).padding(32.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(CleanSurface)
+            .padding(32.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(text = current.emoji, fontSize = 72.sp)
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1244,7 +1426,9 @@ fun AchievementUnlockedOverlay(info: RewardInfo, onDismiss: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) { Text("+${current.rewardPoints} PUNTOS", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = CleanTextDim) }
 
                 Spacer(modifier = Modifier.height(32.dp))
-                Button(onClick = { if (queue.size > 1) { queue = queue.drop(1) } else { onDismiss() } }, modifier = Modifier.fillMaxWidth().height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(16.dp)) {
+                Button(onClick = { if (queue.size > 1) { queue = queue.drop(1) } else { onDismiss() } }, modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(16.dp)) {
                     Text(if (queue.size > 1) "Siguiente" else "Genial", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
@@ -1254,13 +1438,17 @@ fun AchievementUnlockedOverlay(info: RewardInfo, onDismiss: () -> Unit) {
 
 fun scheduleAlarm(context: Context, alarm: AlarmItem) {
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    val types = if (alarm.challengeTypes.isNotEmpty()) alarm.challengeTypes
+    else listOf("MATH")
     val intent = Intent(context, AlarmReceiver::class.java).apply {
-        putExtra("CHALLENGE_TYPE", alarm.challengeType)
+        putStringArrayListExtra("CHALLENGE_TYPES", ArrayList(types))
+        putExtra("CHALLENGE_TYPE", types.firstOrNull() ?: "MATH")
         putExtra("DIFFICULTY", alarm.difficulty)
         putExtra("ROUNDS", alarm.rounds)
         putExtra("XP_BOOST", alarm.xpBoost)
         putExtra("SOUND_URI", alarm.soundUri)
         putExtra("SOUND_NAME", alarm.soundName)
+        putExtra("ALARM_LABEL", alarm.label)
     }
     val pendingIntent = PendingIntent.getBroadcast(context, alarm.id.toInt(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val calendar = Calendar.getInstance().apply {
@@ -1300,29 +1488,42 @@ fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit)
 
     val hasComplete = hasInfinite && hasColors && hasRounds && hasNoAds && hasAvatar && hasXpMultiplier
 
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+    Column(modifier = Modifier
+        .fillMaxSize()
+        .verticalScroll(rememberScrollState())
+        .padding(24.dp)) {
         Text("Tienda", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText)
         Text("Mejoras permanentes", fontSize = 14.sp, color = CleanTextDim)
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Saldo
-        Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CleanSurface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(CleanSurface)
+            .padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("🪙", fontSize = 24.sp)
             Spacer(modifier = Modifier.width(12.dp))
             Text("$points Puntos", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = CleanText)
         }
         Spacer(modifier = Modifier.height(24.dp))
 
-        // PACK OFERTA OPACO Y LLAMATIVO
         if (!hasComplete) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = CleanSurface),
                 shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth().border(2.dp, Brush.linearGradient(listOf(WakeBlue, Color(0xFF00E5FF))), RoundedCornerShape(16.dp))
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        2.dp,
+                        Brush.linearGradient(listOf(WakeBlue, Color(0xFF00E5FF))),
+                        RoundedCornerShape(16.dp)
+                    )
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.background(WakeBlue.copy(alpha = 0.2f), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        Box(modifier = Modifier
+                            .background(WakeBlue.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)) {
                             Text("OFERTA", color = WakeBlue, fontWeight = FontWeight.Black, fontSize = 12.sp, letterSpacing = 1.sp)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1341,7 +1542,9 @@ fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit)
                             }
                         },
                         enabled = points >= 100,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = WakeBlue, disabledContainerColor = CleanSurfaceVariant),
                         shape = RoundedCornerShape(12.dp)
                     ) {
@@ -1385,7 +1588,12 @@ fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit)
 
 @Composable
 fun ShopItemRow(title: String, desc: String, price: Int, isOwned: Boolean, canAfford: Boolean, onBuy: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).clip(RoundedCornerShape(16.dp)).background(CleanSurface).padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier
+        .fillMaxWidth()
+        .padding(bottom = 16.dp)
+        .clip(RoundedCornerShape(16.dp))
+        .background(CleanSurface)
+        .padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = CleanText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Text(desc, color = CleanTextDim, fontSize = 13.sp, lineHeight = 18.sp)

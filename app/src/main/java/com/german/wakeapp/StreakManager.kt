@@ -3,6 +3,7 @@ package com.german.wakeapp
 import android.content.Context
 import android.content.SharedPreferences
 import org.json.JSONArray
+import java.util.Calendar
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
@@ -13,6 +14,19 @@ class StreakManager(context: Context) {
     companion object {
         fun xpForLevel(level: Int): Int {
             return (100.0 * level.toDouble().pow(1.5)).roundToInt()
+        }
+
+        /**
+         * Clave del "día lógico". Un día va de 6:59 a 6:58 del día siguiente.
+         * Si el timestamp cae antes de las 6:59, pertenece al día anterior.
+         */
+        fun logicalDayKey(timestamp: Long): Long {
+            val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+            val minutesOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+            if (minutesOfDay < 6 * 60 + 59) {
+                cal.add(Calendar.DAY_OF_YEAR, -1)
+            }
+            return cal.get(Calendar.YEAR).toLong() * 1000L + cal.get(Calendar.DAY_OF_YEAR).toLong()
         }
     }
 
@@ -65,60 +79,59 @@ class StreakManager(context: Context) {
         return false
     }
 
-    // Racha Congelada
-    fun isStreakFrozen(): Boolean {
-        val frozenUntil = prefs.getLong("FROZEN_UNTIL", 0L)
-        return System.currentTimeMillis() < frozenUntil
+    /**
+     * Registra un despertar. Devuelve el nuevo total de "días distintos".
+     * Guarda también el registro histórico en un JSON para el calendario.
+     */
+    fun registerSuccessfulWakeUp(): Int {
+        val now = System.currentTimeMillis()
+        val currentDayKey = logicalDayKey(now)
+        val lastDayKey = prefs.getLong("LAST_WAKE_DAY_KEY", -1L)
+        val currentDays = getStreak()
+
+        val newDays = if (currentDayKey != lastDayKey) {
+            saveWakeHistory(currentDayKey)
+            currentDays + 1
+        } else {
+            currentDays
+        }
+
+        prefs.edit()
+            .putInt("STREAK_KEY", newDays)
+            .putLong("LAST_WAKE_DAY_KEY", currentDayKey)
+            .putLong("LAST_WAKE_TIME", now)
+            .apply()
+
+        return newDays
     }
 
-    fun getFreezeRemainingMillis(): Long {
-        val frozenUntil = prefs.getLong("FROZEN_UNTIL", 0L)
-        val remaining = frozenUntil - System.currentTimeMillis()
-        return if (remaining > 0) remaining else 0L
-    }
-
-    fun freezeStreakFor24h() {
-        val until = System.currentTimeMillis() + (24 * 60 * 60 * 1000L)
-        prefs.edit().putLong("FROZEN_UNTIL", until).apply()
-    }
-
-    fun checkStreakExpiration() {
-        if (isStreakFrozen()) return
-
-        val lastWake = prefs.getLong("LAST_WAKE_TIME", 0L)
-        val currentStreak = getStreak()
-        if (lastWake > 0 && currentStreak > 0) {
-            val now = System.currentTimeMillis()
-            if (now - lastWake > 24 * 60 * 60 * 1000L) {
-                prefs.edit().putInt("STREAK_KEY", 0).apply()
+    private fun saveWakeHistory(dayKey: Long) {
+        val raw = prefs.getString("WAKE_HISTORY", "[]") ?: "[]"
+        try {
+            val arr = JSONArray(raw)
+            // Evitar duplicados (por seguridad)
+            for (i in 0 until arr.length()) {
+                if (arr.getLong(i) == dayKey) return
             }
+            arr.put(dayKey)
+            prefs.edit().putString("WAKE_HISTORY", arr.toString()).apply()
+        } catch (_: Exception) {}
+    }
+
+    fun getWakeHistory(): List<Long> {
+        val raw = prefs.getString("WAKE_HISTORY", "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            List(arr.length()) { i -> arr.getLong(i) }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
-    fun registerSuccessfulWakeUp(): Int {
-        val calendar = java.util.Calendar.getInstance()
-        val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
-        val minute = calendar.get(java.util.Calendar.MINUTE)
-
-        val countsForStreak = hour >= 6
-
-        val lastWake = prefs.getLong("LAST_WAKE_TIME", 0L)
-        val lastWakeCal = java.util.Calendar.getInstance().apply { timeInMillis = lastWake }
-        val sameDay = lastWakeCal.get(java.util.Calendar.YEAR) == calendar.get(java.util.Calendar.YEAR) &&
-                lastWakeCal.get(java.util.Calendar.DAY_OF_YEAR) == calendar.get(java.util.Calendar.DAY_OF_YEAR)
-        val alreadyCountedToday = sameDay && lastWake > 0L
-
-        val currentStreak = if (countsForStreak && !alreadyCountedToday) getStreak() + 1 else getStreak()
-        val currentPoints = getPoints() + 50
-
-        prefs.edit()
-            .putInt("STREAK_KEY", currentStreak)
-            .putInt("POINTS_KEY", currentPoints)
-            .putLong("LAST_WAKE_TIME", System.currentTimeMillis())
-            .apply()
-
-        return currentStreak
+    fun checkStreakExpiration() {
+        // No-op: los "días distintos" no caducan por inactividad.
     }
+
     fun addPoints(amount: Int) {
         val newPoints = getPoints() + amount
         prefs.edit().putInt("POINTS_KEY", newPoints).apply()
@@ -154,9 +167,6 @@ class StreakManager(context: Context) {
             level += 1
             levelsUp += 1
             needed = xpForLevel(level)
-        }
-        if (levelsUp > 0) {
-            addPoints(levelsUp * 50)
         }
         prefs.edit()
             .putInt("LEVEL_KEY", level)

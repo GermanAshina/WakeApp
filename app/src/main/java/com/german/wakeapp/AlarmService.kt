@@ -18,12 +18,13 @@ import androidx.core.app.NotificationCompat
 class AlarmService : Service() {
 
     private var mediaPlayer: MediaPlayer? = null
-    private var currentChallengeType: String = "MATH"
+    private var currentChallengeTypes: List<String> = listOf("MATH")
     private var currentDifficulty: String = "MEDIUM"
     private var currentRounds: Int = 1
     private var currentXpBoost: Boolean = false
     private var currentSoundUri: String? = null
     private var currentSoundName: String? = null
+    private var currentAlarmLabel: String? = null
 
     companion object {
         const val CHANNEL_ALARM = "ALARM_SERVICE_CHANNEL"
@@ -33,30 +34,35 @@ class AlarmService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Recuperar parámetros (si viene de un reinicio por START_STICKY, intent puede ser null)
         intent?.let {
-            it.getStringExtra("CHALLENGE_TYPE")?.let { v -> currentChallengeType = v }
+            val list = it.getStringArrayListExtra("CHALLENGE_TYPES")
+            if (!list.isNullOrEmpty()) {
+                currentChallengeTypes = list
+            } else {
+                it.getStringExtra("CHALLENGE_TYPE")?.let { v -> currentChallengeTypes = listOf(v) }
+            }
             it.getStringExtra("DIFFICULTY")?.let { v -> currentDifficulty = v }
-            it.getIntExtra("ROUNDS", 1).takeIf { r -> r > 0 }?.let { v -> currentRounds = v }
+            it.getIntExtra("ROUNDS", currentChallengeTypes.size).takeIf { r -> r > 0 }?.let { v -> currentRounds = v }
             it.getBooleanExtra("XP_BOOST", false).let { v -> currentXpBoost = v }
             it.getStringExtra("SOUND_URI")?.let { v -> currentSoundUri = v }
             it.getStringExtra("SOUND_NAME")?.let { v -> currentSoundName = v }
+            it.getStringExtra("ALARM_LABEL")?.let { v -> currentAlarmLabel = v }
         }
+        if (currentRounds <= 0) currentRounds = currentChallengeTypes.size
+        if (currentRounds > currentChallengeTypes.size) currentRounds = currentChallengeTypes.size
 
         createChannelIfNeeded()
 
-        // Si ya estamos sonando (onStartCommand repetido), no reiniciamos el audio ni la notificación
         if (mediaPlayer?.isPlaying == true) {
-            // Solo actualizamos el estado por si acaso
             AlarmStateHolder.markRinging(
-                this, currentChallengeType, currentDifficulty,
+                this, currentChallengeTypes, currentDifficulty,
                 currentRounds, currentXpBoost, currentSoundUri, currentSoundName
             )
             return START_STICKY
         }
 
         AlarmStateHolder.markRinging(
-            this, currentChallengeType, currentDifficulty,
+            this, currentChallengeTypes, currentDifficulty,
             currentRounds, currentXpBoost, currentSoundUri, currentSoundName
         )
 
@@ -74,7 +80,6 @@ class AlarmService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Acción explícita en la notificación para reabrir el desafío si el usuario la expande
         val openAction = NotificationCompat.Action.Builder(
             android.R.drawable.ic_lock_idle_alarm,
             "Resolver desafío",
@@ -82,10 +87,11 @@ class AlarmService : Service() {
         ).build()
 
         val roundsText = if (currentRounds > 1) " · $currentRounds rondas" else ""
+        val labelText = if (!currentAlarmLabel.isNullOrBlank()) "🏷 $currentAlarmLabel · " else ""
         val notifText = if (!currentSoundName.isNullOrBlank())
-            "🎵 $currentSoundName$roundsText — Toca para resolver el desafío."
+            "$labelText🎵 $currentSoundName$roundsText — Toca para resolver el desafío."
         else
-            "Toca para resolver el desafío$roundsText."
+            "$labelText Toca para resolver el desafío$roundsText."
 
         return NotificationCompat.Builder(this, CHANNEL_ALARM)
             .setContentTitle("¡Alarma Sonando!")
@@ -103,10 +109,12 @@ class AlarmService : Service() {
 
     private fun challengeIntent(): Intent =
         Intent(this, ChallengeActivity::class.java).apply {
-            putExtra("CHALLENGE_TYPE", currentChallengeType)
+            putStringArrayListExtra("CHALLENGE_TYPES", ArrayList(currentChallengeTypes))
+            putExtra("CHALLENGE_TYPE", currentChallengeTypes.firstOrNull() ?: "MATH")
             putExtra("DIFFICULTY", currentDifficulty)
             putExtra("ROUNDS", currentRounds)
             putExtra("XP_BOOST", currentXpBoost)
+            putExtra("ALARM_LABEL", currentAlarmLabel)
             putExtra("FROM_SERVICE", true)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
@@ -115,7 +123,6 @@ class AlarmService : Service() {
         try {
             startActivity(challengeIntent())
         } catch (e: Exception) {
-            // Si Android bloquea el background start (Android 10+), al menos queda la notificación
             e.printStackTrace()
         }
     }
@@ -177,11 +184,6 @@ class AlarmService : Service() {
         }
     }
 
-    /**
-     * Si el usuario cierra la app desde recientes, NO paramos el servicio.
-     * La alarma debe seguir sonando hasta que se resuelva el desafío.
-     * START_STICKY ya garantiza el reinicio si Android lo mata.
-     */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
     }

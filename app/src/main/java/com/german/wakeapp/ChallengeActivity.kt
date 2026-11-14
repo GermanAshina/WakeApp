@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import com.german.wakeapp.ui.theme.*
 import kotlinx.coroutines.launch
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -62,27 +64,31 @@ class ChallengeActivity : ComponentActivity() {
             )
         }
 
-        val challengeType = intent.getStringExtra("CHALLENGE_TYPE") ?: "MATH"
-        val difficulty = intent.getStringExtra("DIFFICULTY") ?: "MEDIUM"
-        val rounds = intent.getIntExtra("ROUNDS", 1).coerceIn(1, 10)
+        val incomingTypes: List<String> = intent.getStringArrayListExtra("CHALLENGE_TYPES")
+            ?.filter { it.isNotBlank() }
+            ?.takeIf { it.isNotEmpty() }
+            ?: listOf(intent.getStringExtra("CHALLENGE_TYPE") ?: "MATH")
 
-        // Bloquea el botón atrás: la alarma no se puede cerrar así
+        val difficulty = intent.getStringExtra("DIFFICULTY") ?: "MEDIUM"
+        val roundsFromIntent = intent.getIntExtra("ROUNDS", incomingTypes.size)
+        val rounds = roundsFromIntent.coerceIn(1, 10)
+
+        val challengeSequence = ChallengeCatalog.buildSequence(incomingTypes, rounds)
+
+        val ambientColor = when (challengeSequence.firstOrNull()) {
+            "TRACING" -> NeonGreen
+            "TEXT" -> NeonCyan
+            else -> PurplePrimary
+        }
+
         onBackPressedDispatcher.addCallback(this,
             object : androidx.activity.OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    // No hacer nada. Obliga a resolver el desafío.
-                }
+                override fun handleOnBackPressed() {}
             }
         )
 
         setContent {
             Surface(modifier = Modifier.fillMaxSize(), color = DarkBackground) {
-                val ambientColor = when (challengeType) {
-                    "TRACING" -> NeonGreen
-                    "TEXT" -> NeonCyan
-                    else -> PurplePrimary
-                }
-
                 val infinite = rememberInfiniteTransition(label = "bg")
                 val scale by infinite.animateFloat(
                     initialValue = 0.8f, targetValue = 1.2f,
@@ -102,9 +108,8 @@ class ChallengeActivity : ComponentActivity() {
                         )
                 ) {
                     MultiRoundChallengeHost(
-                        challengeType = challengeType,
+                        challengeSequence = challengeSequence,
                         difficulty = difficulty,
-                        totalRounds = rounds,
                         onAllDone = { stopAndFinish(difficulty) }
                     )
                 }
@@ -114,14 +119,7 @@ class ChallengeActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Si por alguna razón el servicio ya no está sonando (proceso matado, etc.)
-        // pero seguimos aquí, lo relanzamos para no dejar un estado inconsistente.
         AlarmStateHolder.restoreIfNeeded(this)
-        if (!AlarmStateHolder.isRinging) {
-            // El servicio ya no corre: significa que el desafío ya se resolvió
-            // (o el sistema mató el servicio). Cerramos sin más.
-            // Esto es defensivo: no debería pasar normalmente.
-        }
     }
 
     private fun stopAndFinish(difficulty: String) {
@@ -149,8 +147,9 @@ class ChallengeActivity : ComponentActivity() {
         val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         newlyUnlocked.addAll(achievementManager.checkEarlyBird(currentHour))
 
-        val currentChallengeType = intent.getStringExtra("CHALLENGE_TYPE") ?: "MATH"
-        newlyUnlocked.addAll(achievementManager.checkChallengeAchievements(currentChallengeType))
+        val firstType = intent.getStringArrayListExtra("CHALLENGE_TYPES")?.firstOrNull()
+            ?: intent.getStringExtra("CHALLENGE_TYPE") ?: "MATH"
+        newlyUnlocked.addAll(achievementManager.checkChallengeAchievements(firstType))
         newlyUnlocked.addAll(achievementManager.checkMultiRoundAchievements(intent.getIntExtra("ROUNDS", 1)))
 
         val bonusLevels = newlyUnlocked.size
@@ -185,12 +184,7 @@ class ChallengeActivity : ComponentActivity() {
             bonusPoints = bonusPoints
         )
 
-        // Marcar como detenida ANTES de parar el servicio para que MainActivity
-        // no piense que sigue sonando si se reabre rápido.
         AlarmStateHolder.markStopped(this)
-
-        // Parar servicio explícitamente (también se llama en onDestroy, pero aquí
-        // aseguramos que el audio se corte YA)
         stopService(Intent(this, AlarmService::class.java))
 
         val result = Intent().apply {
@@ -263,13 +257,13 @@ fun BigActionButton(text: String, enabled: Boolean, containerColor: Color, conte
 
 @Composable
 fun MultiRoundChallengeHost(
-    challengeType: String,
+    challengeSequence: List<String>,
     difficulty: String,
-    totalRounds: Int,
     onAllDone: () -> Unit
 ) {
     val context = LocalContext.current
     val streakManager = remember { StreakManager(context) }
+    val totalRounds = challengeSequence.size
     var roundsDone by remember { mutableIntStateOf(0) }
     var autoDisableUsed by remember { mutableStateOf(false) }
 
@@ -311,17 +305,21 @@ fun MultiRoundChallengeHost(
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            key(roundsDone) {
-                when (challengeType) {
+            val currentType = challengeSequence.getOrNull(roundsDone) ?: challengeSequence.last()
+            key(roundsDone, currentType) {
+                when (currentType) {
                     "TRACING" -> TracingChallengeScreen(
                         difficulty = difficulty,
                         onSuccess = { onRoundSuccess() }
                     )
-                    else -> StandardChallengeScreen(
-                        challengeType = challengeType,
+                    "TEXT", "MATH" -> StandardChallengeScreen(
+                        challengeType = currentType,
                         difficulty = difficulty,
                         onSuccess = { onRoundSuccess() }
                     )
+                    else -> {
+                        LaunchedEffect(Unit) { onRoundSuccess() }
+                    }
                 }
             }
         }

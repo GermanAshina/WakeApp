@@ -7,7 +7,8 @@ object AlarmStateHolder {
 
     private const val PREFS = "wakeapp_alarm_state"
     private const val KEY_ACTIVE = "alarm_active"
-    private const val KEY_CHALLENGE = "alarm_challenge"
+    private const val KEY_CHALLENGE_TYPES = "alarm_challenge_types"
+    private const val KEY_CHALLENGE = "alarm_challenge" // legacy
     private const val KEY_DIFFICULTY = "alarm_difficulty"
     private const val KEY_ROUNDS = "alarm_rounds"
     private const val KEY_XP_BOOST = "alarm_xp_boost"
@@ -19,7 +20,7 @@ object AlarmStateHolder {
         private set
 
     @Volatile
-    var lastChallengeType: String = "MATH"
+    var lastChallengeTypes: List<String> = listOf("MATH")
         private set
 
     @Volatile
@@ -47,7 +48,7 @@ object AlarmStateHolder {
 
     fun markRinging(
         context: Context,
-        challengeType: String,
+        challengeTypes: List<String>,
         difficulty: String,
         rounds: Int,
         xpBoost: Boolean,
@@ -55,7 +56,7 @@ object AlarmStateHolder {
         soundName: String?
     ) {
         isRinging = true
-        lastChallengeType = challengeType
+        lastChallengeTypes = challengeTypes.ifEmpty { listOf("MATH") }
         lastDifficulty = difficulty
         lastRounds = rounds
         lastXpBoost = xpBoost
@@ -64,7 +65,8 @@ object AlarmStateHolder {
 
         prefs(context).edit()
             .putBoolean(KEY_ACTIVE, true)
-            .putString(KEY_CHALLENGE, challengeType)
+            .putString(KEY_CHALLENGE_TYPES, lastChallengeTypes.joinToString("|"))
+            .putString(KEY_CHALLENGE, lastChallengeTypes.firstOrNull() ?: "MATH")
             .putString(KEY_DIFFICULTY, difficulty)
             .putInt(KEY_ROUNDS, rounds)
             .putBoolean(KEY_XP_BOOST, xpBoost)
@@ -85,9 +87,14 @@ object AlarmStateHolder {
         val p = prefs(context)
         if (p.getBoolean(KEY_ACTIVE, false)) {
             isRinging = true
-            lastChallengeType = p.getString(KEY_CHALLENGE, "MATH") ?: "MATH"
+            val joined = p.getString(KEY_CHALLENGE_TYPES, null)
+            lastChallengeTypes = if (!joined.isNullOrBlank()) {
+                joined.split("|").filter { it.isNotBlank() }
+            } else {
+                listOf(p.getString(KEY_CHALLENGE, "MATH") ?: "MATH")
+            }.ifEmpty { listOf("MATH") }
             lastDifficulty = p.getString(KEY_DIFFICULTY, "MEDIUM") ?: "MEDIUM"
-            lastRounds = p.getInt(KEY_ROUNDS, 1)
+            lastRounds = p.getInt(KEY_ROUNDS, lastChallengeTypes.size).coerceIn(1, lastChallengeTypes.size)
             lastXpBoost = p.getBoolean(KEY_XP_BOOST, false)
             lastSoundUri = p.getString(KEY_SOUND_URI, null)
             lastSoundName = p.getString(KEY_SOUND_NAME, null)

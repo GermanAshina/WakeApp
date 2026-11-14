@@ -1,8 +1,6 @@
 package com.german.wakeapp
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -14,10 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -29,22 +24,16 @@ fun SettingsSection(
     settingsManager: SettingsManager
 ) {
     val context = LocalContext.current
+    val themeManager = remember { ThemeManager(context) }
+
     var showSoundPicker by remember { mutableStateOf(false) }
+    var showThemePicker by remember { mutableStateOf(false) }
 
-    var soundType by remember { mutableStateOf(settingsManager.getDefaultSoundType()) }
+    var vibrationEnabled by remember { mutableStateOf(settingsManager.isVibrationEnabled()) }
     var volume by remember { mutableFloatStateOf(settingsManager.getAlarmVolume()) }
-
-    val level = streakManager.getLevel()
-    val xp = streakManager.getXp()
-    val points = streakManager.getPoints()
-    val streak = streakManager.getStreak()
-    val freezeActive = streakManager.isStreakFrozen()
-
-    val versionName = remember {
-        try {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
-        } catch (_: Exception) { "1.0" }
-    }
+    var confirmDelete by remember { mutableStateOf(settingsManager.isConfirmDeleteEnabled()) }
+    var soundType by remember { mutableStateOf(settingsManager.getDefaultSoundType()) }
+    var activeTheme by remember { mutableStateOf(themeManager.getActive()) }
 
     Column(
         modifier = Modifier
@@ -55,22 +44,42 @@ fun SettingsSection(
         Text("Ajustes", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = CleanText)
         Spacer(modifier = Modifier.height(32.dp))
 
-        // ============ SONIDO ============
-        SectionHeader("SONIDO")
-
-        SettingsClickRow(
-            emoji = "🔔",
-            title = "Sonido por defecto",
-            subtitle = when (soundType) {
-                "alarm" -> "Tono de alarma"
-                "notification" -> "Tono de notificación"
-                "ringtone" -> "Tono de llamada"
-                else -> "Tono de alarma"
-            },
-            onClick = { showSoundPicker = true }
-        )
+        // --- AJUSTES GENERALES ---
+        Text("GENERAL", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CleanTextDim, letterSpacing = 1.5.sp)
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Vibración
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CleanSurface)
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("📳", fontSize = 24.sp)
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Vibración al despertar", fontWeight = FontWeight.Bold, color = CleanText, fontSize = 16.sp)
+                Text("El móvil vibrará mientras suena la alarma.", fontSize = 13.sp, color = CleanTextDim)
+            }
+            Switch(
+                checked = vibrationEnabled,
+                onCheckedChange = {
+                    vibrationEnabled = it
+                    settingsManager.setVibrationEnabled(it)
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = CleanText,
+                    checkedTrackColor = WakeBlue,
+                    uncheckedThumbColor = CleanTextDim,
+                    uncheckedTrackColor = CleanSurfaceVariant
+                )
+            )
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Volumen
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -100,51 +109,92 @@ fun SettingsSection(
                 )
             )
         }
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Spacer(modifier = Modifier.height(40.dp))
-
-        // ============ TUS DATOS ============
-        SectionHeader("TUS DATOS")
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = CleanSurface),
-            shape = RoundedCornerShape(16.dp)
+        // Confirmar borrado
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CleanSurface)
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                SettingsInfoRow("Nivel actual", "$level")
-                HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-                SettingsInfoRow("XP total", "$xp")
-                HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-                SettingsInfoRow("Puntos", "$points")
-                HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-                SettingsInfoRow("Racha actual", "$streak días")
-                HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-                SettingsInfoRow("Estado", if (freezeActive) "Congelada" else "Activa")
+            Text("🗑", fontSize = 24.sp)
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Confirmar borrado", fontWeight = FontWeight.Bold, color = CleanText, fontSize = 16.sp)
+                Text("Preguntar antes de eliminar una alarma.", fontSize = 13.sp, color = CleanTextDim)
             }
+            Switch(
+                checked = confirmDelete,
+                onCheckedChange = {
+                    confirmDelete = it
+                    settingsManager.setConfirmDeleteEnabled(it)
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = CleanText,
+                    checkedTrackColor = WakeBlue,
+                    uncheckedThumbColor = CleanTextDim,
+                    uncheckedTrackColor = CleanSurfaceVariant
+                )
+            )
         }
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        // ============ INFORMACIÓN ============
-        SectionHeader("INFORMACIÓN")
-
-        SettingsInfoCard(
-            emoji = "ℹ️",
-            title = "Acerca de WakeApp",
-            subtitle = "Versión $versionName · Despertador inteligente"
-        )
+        // --- PERSONALIZACIÓN ---
+        Text("PERSONALIZACIÓN", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CleanTextDim, letterSpacing = 1.5.sp)
         Spacer(modifier = Modifier.height(16.dp))
 
-        SettingsInfoCard(
-            emoji = "🔐",
-            title = "Privacidad",
-            subtitle = "Todos los datos se guardan localmente en tu dispositivo"
-        )
+        // Sonido
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CleanSurface)
+                .clickable { showSoundPicker = true }
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("🔔", fontSize = 24.sp)
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Sonido por defecto", fontWeight = FontWeight.Bold, color = CleanText, fontSize = 16.sp)
+                Text(when (soundType) {
+                    "alarm" -> "Tono de alarma"
+                    "notification" -> "Tono de notificación"
+                    "ringtone" -> "Tono de llamada"
+                    else -> "Tono de alarma"
+                }, fontSize = 14.sp, color = CleanTextDim)
+            }
+            Text("›", fontSize = 24.sp, color = CleanTextDim, fontWeight = FontWeight.Light)
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Tema
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CleanSurface)
+                .clickable { showThemePicker = true }
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(activeTheme.emoji, fontSize = 24.sp)
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Tema de la app", fontWeight = FontWeight.Bold, color = CleanText, fontSize = 16.sp)
+                Text(activeTheme.name, fontSize = 14.sp, color = CleanTextDim)
+            }
+            Text("›", fontSize = 24.sp, color = CleanTextDim, fontWeight = FontWeight.Light)
+        }
 
         Spacer(modifier = Modifier.height(40.dp))
     }
 
+    // --- Diálogo de sonido ---
     if (showSoundPicker) {
         AlertDialog(
             onDismissRequest = { showSoundPicker = false },
@@ -186,80 +236,64 @@ fun SettingsSection(
             }
         )
     }
-}
 
-@Composable
-private fun SectionHeader(title: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
-        Text(
-            text = title,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = CleanTextDim,
-            letterSpacing = 1.5.sp
+    // --- Diálogo de tema ---
+    if (showThemePicker) {
+        AlertDialog(
+            onDismissRequest = { showThemePicker = false },
+            containerColor = CleanSurface,
+            title = { Text("Tema de la app", color = CleanText, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    ThemeCatalog.all.forEach { theme ->
+                        val unlocked = themeManager.isUnlocked(theme.id) || theme.price == 0
+                        val isActive = activeTheme.id == theme.id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isActive) CleanSurfaceVariant else Color.Transparent)
+                                .clickable(enabled = unlocked) {
+                                    themeManager.setActive(theme.id)
+                                    activeTheme = theme
+                                    showThemePicker = false
+                                }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(theme.primary)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    theme.name,
+                                    color = if (unlocked) CleanText else CleanTextDim,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    if (!unlocked) "🔒 Bloqueado" else theme.emoji,
+                                    color = CleanTextDim,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (isActive) {
+                                Text("✓", color = WakeBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showThemePicker = false }) {
+                    Text("Cerrar", color = WakeBlue, fontWeight = FontWeight.Bold)
+                }
+            }
         )
-        Spacer(modifier = Modifier.width(12.dp))
-        HorizontalDivider(color = CleanSurfaceVariant, modifier = Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun SettingsClickRow(
-    emoji: String,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(CleanSurface)
-            .clickable { onClick() }
-            .padding(20.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(emoji, fontSize = 24.sp)
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.Bold, color = CleanText, fontSize = 16.sp)
-            Text(subtitle, fontSize = 14.sp, color = CleanTextDim)
-        }
-        Text("›", fontSize = 24.sp, color = CleanTextDim, fontWeight = FontWeight.Light)
-    }
-}
-
-@Composable
-private fun SettingsInfoCard(
-    emoji: String,
-    title: String,
-    subtitle: String
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(CleanSurface)
-            .padding(20.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(emoji, fontSize = 24.sp)
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.Bold, color = CleanText, fontSize = 16.sp)
-            Text(subtitle, fontSize = 14.sp, color = CleanTextDim, lineHeight = 20.sp)
-        }
-    }
-}
-
-@Composable
-private fun SettingsInfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, color = CleanTextDim, fontSize = 15.sp)
-        Text(value, color = CleanText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
 }

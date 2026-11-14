@@ -14,29 +14,28 @@ data class Achievement(
 
 object AchievementCatalog {
     val all = listOf(
-        // Rachas
-        Achievement("first_wake", "Una alarma al año no hace daño", "Despierta por primera vez.", "🥇", 50, 1),
-        Achievement("streak_3", "Tres son multitud", "3 días seguidos despertando.", "🔥", 100, 3),
-        Achievement("streak_7", "No hay semana sin siete días", "7 días seguidos.", "🔥🔥", 250, 7),
-        Achievement("streak_21", "Nuevo Hábito Adquirido", "21 días seguidos. Ya es rutina.", "🧠", 500, 21),
-        Achievement("streak_30", "Mes de Hierro", "30 días seguidos.", "🛡️", 750, 30),
-        Achievement("streak_100", "Ambicioso", "100 días seguidos. Leyenda.", "👑", 2000, 100),
+        // Días distintos
+        Achievement("first_wake", "Una alarma al año no hace daño", "Despierta por primera vez.", "🥇", 10, 1),
+        Achievement("streak_3", "Tres son multitud", "3 días distintos despertando.", "🔥", 20, 3),
+        Achievement("streak_7", "No hay semana sin siete días", "7 días distintos despertando.", "💪", 50, 7),
+        Achievement("streak_21", "Nuevo Hábito Adquirido", "21 días distintos. Ya es rutina.", "🧠", 100, 21),
+        Achievement("streak_30", "Mes de Hierro", "30 días distintos despertando.", "🛡️", 150, 30),
+        Achievement("streak_100", "Ambicioso", "100 días distintos. Leyenda.", "👑", 500, 100),
 
         // Minijuegos (Totales)
-        Achievement("math_10", "2x2=?", "Completa 10 desafíos de matemáticas.", "🧮", 150, 10),
-        Achievement("text_10", "Despacito y con buena letra", "Completa 10 desafíos de escribir.", "✍️", 150, 10),
-        Achievement("tracing_10", "No te pases de la raya", "Completa 10 desafíos de delinear.", "✏️", 150, 10),
+        Achievement("math_10", "2x2=?", "Completa 10 desafíos de matemáticas.", "🧮", 30, 10),
+        Achievement("text_10", "Despacito y con buena letra", "Completa 10 desafíos de escribir.", "✍️", 30, 10),
+        Achievement("tracing_10", "No te pases de la raya", "Completa 10 desafíos de delinear.", "✏️", 30, 10),
 
         // Rondas múltiples
-        Achievement("rounds_5", "Doble o nada", "Supera una alarma de 5 rondas.", "🎯", 200, 1),
-        Achievement("rounds_10", "Maratón mental", "Supera una alarma de 10 rondas.", "🏃", 400, 1),
+        Achievement("rounds_4", "Cuádruple o nada", "Supera una alarma de 4 rondas.", "🎯", 40, 1),
 
         // Otros
-        Achievement("early_7am", "Madrugador", "Levántate a las 7:00h o antes.", "🌅", 150, 1),
-        Achievement("shop_buyer", "Comprador", "Compra un objeto en la Tienda.", "🛒", 100, 1),
-        Achievement("shop_10", "Coleccionista", "Compra 10 objetos en la Tienda.", "🧺", 400, 10),
-        Achievement("rich_10k", "Avaricioso", "Acumula 10,000 puntos.", "💰", 500, 10000),
-        Achievement("ad_watcher", "Caja Tonta", "Ve un anuncio recompensado.", "📺", 100, 1)
+        Achievement("early_7am", "Madrugador", "Levántate a las 7:00h o antes.", "🌅", 30, 1),
+        Achievement("shop_buyer", "Comprador", "Compra un objeto en la Tienda.", "🛒", 20, 1),
+        Achievement("shop_10", "Coleccionista", "Compra 10 objetos en la Tienda.", "🧺", 80, 10),
+        Achievement("rich_10k", "Avaricioso", "Acumula 5,000 puntos.", "💰", 100, 5000),
+        Achievement("ad_watcher", "Caja Tonta", "Ve un anuncio recompensado.", "📺", 20, 1)
     )
 }
 
@@ -102,7 +101,7 @@ class AchievementManager(context: Context) {
 
     fun checkPointsAchievement(points: Int): List<Achievement> {
         val newly = mutableListOf<Achievement>()
-        if (points >= 10000 && unlock("rich_10k")) newly.add(byId("rich_10k"))
+        if (points >= 5000 && unlock("rich_10k")) newly.add(byId("rich_10k"))
         return newly
     }
 
@@ -122,8 +121,7 @@ class AchievementManager(context: Context) {
 
     fun checkMultiRoundAchievements(rounds: Int): List<Achievement> {
         val newly = mutableListOf<Achievement>()
-        if (rounds >= 5 && unlock("rounds_5")) newly.add(byId("rounds_5"))
-        if (rounds >= 10 && unlock("rounds_10")) newly.add(byId("rounds_10"))
+        if (rounds >= 4 && unlock("rounds_4")) newly.add(byId("rounds_4"))
         return newly
     }
 

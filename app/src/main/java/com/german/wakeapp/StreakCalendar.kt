@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -26,19 +27,32 @@ fun StreakCalendarDialog(
     streak: Int,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val streakManager = remember { StreakManager(context) }
+    val wakeHistory = remember { streakManager.getWakeHistory() }
+
     val calendar = Calendar.getInstance()
     val today = calendar.get(Calendar.DAY_OF_MONTH)
     val currentMonth = calendar.get(Calendar.MONTH)
     val currentYear = calendar.get(Calendar.YEAR)
 
-    val wakeDays = remember(streak) {
+    // Filtrar los días del historial que pertenecen a este mes y año
+    val wakeDays = remember(wakeHistory) {
         val days = mutableListOf<Int>()
-        var d = Calendar.getInstance()
-        for (i in 0 until streak) {
-            if (d.get(Calendar.MONTH) == currentMonth && d.get(Calendar.YEAR) == currentYear) {
-                days.add(d.get(Calendar.DAY_OF_MONTH))
+        wakeHistory.forEach { key ->
+            // La clave es: year * 1000 + dayOfYear
+            val year = (key / 1000).toInt()
+            val dayOfYear = (key % 1000).toInt()
+
+            if (year == currentYear) {
+                val cal = Calendar.getInstance().apply {
+                    set(Calendar.YEAR, year)
+                    set(Calendar.DAY_OF_YEAR, dayOfYear)
+                }
+                if (cal.get(Calendar.MONTH) == currentMonth) {
+                    days.add(cal.get(Calendar.DAY_OF_MONTH))
+                }
             }
-            d.add(Calendar.DAY_OF_YEAR, -1)
         }
         days
     }
@@ -57,7 +71,7 @@ fun StreakCalendarDialog(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
-                // Cabecera con el mes y "Mi Calendario" en lugar de números
+                // Cabecera con el mes y los días totales
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -71,7 +85,7 @@ fun StreakCalendarDialog(
                     )
 
                     Text(
-                        text = "Mi Calendario",
+                        text = "$streak días",
                         color = WakeBlue,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
