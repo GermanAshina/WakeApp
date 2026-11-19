@@ -1,3 +1,4 @@
+// MainActivity.kt
 package com.german.wakeapp
 
 import androidx.compose.foundation.Canvas
@@ -45,6 +46,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -59,20 +61,42 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.german.wakeapp.ui.theme.*
 import kotlinx.coroutines.delay
 import java.util.Calendar
 
-// --- PALETA CLÍNICA ---
-val CleanBg = Color(0xFF0A0A0A)
-val CleanSurface = Color(0xFF1A1A1A)
-val CleanSurfaceVariant = Color(0xFF262626)
-val CleanText = Color(0xFFFFFFFF)
-val CleanTextDim = Color(0xFF888888)
-val WakeBlue = Color(0xFF1D9BF0)
+// --- PALETA CLÍNICA (oscura / clara según AppPalette.isLight) ---
+object AppPalette {
+    var isLight by mutableStateOf(false)
+    var accent by mutableStateOf(ThemeCatalog.DEFAULT_ACCENT)
+    var isDefaultTheme by mutableStateOf(true)
+
+    fun applyTheme(theme: AppTheme) {
+        accent = theme.primary
+        isDefaultTheme = theme.id == ThemeCatalog.DEFAULT_ID
+    }
+}
+
+// En modo oscuro con un tema equipado, los fondos se tiñen sutilmente del color del tema.
+// En modo claro todo se queda blanco/gris, y con el tema por defecto no cambia nada.
+private fun themed(base: Color, fraction: Float): Color =
+    if (AppPalette.isLight || AppPalette.isDefaultTheme) base else lerp(base, AppPalette.accent, fraction)
+
+val CleanBg: Color get() = if (AppPalette.isLight) Color(0xFFFFFFFF) else themed(Color(0xFF0A0A0A), 0.06f)
+val CleanSurface: Color get() = if (AppPalette.isLight) Color(0xFFF2F2F2) else themed(Color(0xFF1A1A1A), 0.10f)
+val CleanSurfaceVariant: Color get() = if (AppPalette.isLight) Color(0xFFE2E2E2) else themed(Color(0xFF262626), 0.14f)
+val CleanText: Color get() = if (AppPalette.isLight) Color(0xFF111111) else Color(0xFFFFFFFF)
+val CleanTextDim: Color get() = if (AppPalette.isLight) Color(0xFF6B6B6B) else Color(0xFF888888)
+// Color de acento: sigue al tema equipado (azul si es "Por defecto")
+val WakeBlue: Color get() = AppPalette.accent
 val WakeRed = Color(0xFFFF5252)
+
+// Textos que van directamente sobre la imagen de fondo: siempre claros
+val OnBgText = Color(0xFFFFFFFF)
+val OnBgTextDim = Color(0xFFBBBBBB)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,11 +121,19 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            WakeAppTheme {
+            val settingsManager = remember { SettingsManager(this@MainActivity) }
+            // Carga la preferencia guardada una sola vez al arrancar
+            remember {
+                AppPalette.isLight = settingsManager.isLightMode()
+                AppPalette.applyTheme(ThemeManager(this@MainActivity).getActive())
+                true
+            }
+
+            WakeAppTheme(
+                darkTheme = !AppPalette.isLight,
+                accent = if (AppPalette.isDefaultTheme) null else AppPalette.accent
+            ) {
                 Surface(modifier = Modifier.fillMaxSize(), color = CleanBg) {
-                    // Lógica para ver si mostrar el onboarding o la app principal
-                    val context = LocalContext.current
-                    val settingsManager = remember { SettingsManager(context) }
                     var isOnboarded by remember { mutableStateOf(settingsManager.isOnboardingCompleted()) }
 
                     if (!isOnboarded) {
@@ -147,10 +179,58 @@ fun challengeAccent(type: String): Color = CleanText
 fun challengeEmoji(type: String): String = ChallengeCatalog.byId(type).emoji
 fun challengeTitle(type: String): String = ChallengeCatalog.label(type)
 
-fun getAlarmColor(colorHex: String, defaultAccent: Color): Color {
-    return when (colorHex) {
-        "RED" -> WakeRed
-        else -> WakeBlue
+// --- CATÁLOGO DE COLORES DE ALARMA ---
+// Los 2 primeros son gratis. El resto se desbloquea con "Nuevos Marcadores" en la Tienda.
+data class AlarmColor(val id: String, val name: String, val color: Color)
+
+object AlarmColorCatalog {
+    const val FREE_COUNT = 2
+
+    val all = listOf(
+        AlarmColor("DEFAULT", "Azul", WakeBlue),
+        AlarmColor("RED", "Rojo", WakeRed),
+        AlarmColor("ORANGE", "Naranja", Color(0xFFFF9800)),
+        AlarmColor("YELLOW", "Amarillo", Color(0xFFFFD600)),
+        AlarmColor("GREEN", "Verde", Color(0xFF4CAF50)),
+        AlarmColor("TEAL", "Turquesa", Color(0xFF00BFA5)),
+        AlarmColor("CYAN", "Cian", Color(0xFF00E5FF)),
+        AlarmColor("PURPLE", "Morado", Color(0xFFAB47BC)),
+        AlarmColor("PINK", "Rosa", Color(0xFFFF4081)),
+        AlarmColor("INDIGO", "Índigo", Color(0xFF5C6BC0))
+    )
+
+    fun byId(id: String): Color = all.firstOrNull { it.id == id }?.color ?: WakeBlue
+}
+
+fun getAlarmColor(colorHex: String, defaultAccent: Color): Color =
+    AlarmColorCatalog.byId(colorHex)
+
+@Composable
+fun ColorPickerRow(
+    selectedId: String,
+    allUnlocked: Boolean,
+    circleSize: Int,
+    onSelect: (String) -> Unit
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        items(AlarmColorCatalog.all) { c ->
+            val locked = !allUnlocked && AlarmColorCatalog.all.indexOf(c) >= AlarmColorCatalog.FREE_COUNT
+            val isSelected = selectedId == c.id && !locked
+            Box(
+                modifier = Modifier
+                    .size(circleSize.dp)
+                    .clip(CircleShape)
+                    .background(c.color.copy(alpha = if (locked) 0.3f else 1f))
+                    .border(if (isSelected) 3.dp else 0.dp, CleanText, CircleShape)
+                    .clickable(enabled = !locked) { onSelect(c.id) },
+                contentAlignment = Alignment.Center
+            ) {
+                if (locked) Text("🔒", fontSize = 14.sp)
+            }
+        }
     }
 }
 
@@ -196,12 +276,57 @@ fun AnimatedBackground() {
     }
 }
 
+/**
+ * Avatar circular anónimo dibujado con Canvas.
+ * Fondo gris claro + silueta (cabeza elíptica y hombros) en gris oscuro.
+ */
+@Composable
+fun AnonymousAvatar(
+    size: Int = 56,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    val bgColor = Color(0xFFDDE1E4)
+    val fgColor = Color(0xFF6C7278)
+
+    val baseModifier = modifier
+        .size(size.dp)
+        .clip(CircleShape)
+        .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+
+    Box(
+        modifier = baseModifier.background(bgColor),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = this.size.width
+            val h = this.size.height
+
+            // Cabeza: elipse centrada ligeramente arriba
+            val headW = w * 0.42f
+            val headH = h * 0.46f
+            drawOval(
+                color = fgColor,
+                topLeft = Offset((w - headW) / 2f, h * 0.16f),
+                size = Size(headW, headH)
+            )
+
+            // Hombros: arco grande que sale por abajo (círculo recortado)
+            val shouldersSize = w * 1.05f
+            drawCircle(
+                color = fgColor,
+                radius = shouldersSize / 2f,
+                center = Offset(w / 2f, h * 1.18f)
+            )
+        }
+    }
+}
+
 @Composable
 fun MainHeader(
     level: Int,
     xp: Int,
     readingMode: Boolean,
-    userName: String,
     onToggleReading: () -> Unit,
     onInfoClick: () -> Unit,
     onRewardsClick: () -> Unit,
@@ -223,32 +348,22 @@ fun MainHeader(
             modifier = Modifier.fillMaxWidth().height(120.dp),
             contentAlignment = Alignment.Center
         ) {
-            // IZQUIERDA: Saludo con el nombre
+            // IZQUIERDA: Avatar anónimo (clickable → perfil)
             Column(
                 modifier = Modifier.align(Alignment.CenterStart),
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = "Hola,",
-                    fontSize = 14.sp,
-                    color = CleanTextDim,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = userName.ifBlank { "Madrugador" },
-                    fontSize = 20.sp,
-                    color = CleanText,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                AnonymousAvatar(
+                    size = 56,
+                    onClick = onProfileClick
                 )
             }
 
-            // CENTRO: Logo y WakeApp
+            // CENTRO: Logo y WakeApp (clickable → info de la app)
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
-                modifier = Modifier.clickable { onProfileClick() }
+                modifier = Modifier.clickable { onInfoClick() }
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.img_icon_info),
@@ -351,9 +466,6 @@ fun MainScreen() {
     var currentXp by remember { mutableIntStateOf(streakManager.getXp()) }
     var alarms by remember { mutableStateOf(alarmRepository.loadAll()) }
 
-    // Obtener el nombre de usuario
-    val userName = remember { settingsManager.getUserName() }
-
     var showTimePicker by remember { mutableStateOf(false) }
     var editingAlarm by remember { mutableStateOf<AlarmItem?>(null) }
     var showInfoDialog by remember { mutableStateOf(false) }
@@ -362,8 +474,11 @@ fun MainScreen() {
     var showAlarmLimitDialog by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
 
+    // Alarma pendiente de confirmación de borrado
+    var alarmPendingDelete by remember { mutableStateOf<AlarmItem?>(null) }
+
     var selectedChallengeType by remember { mutableStateOf("MATH") }
-    var selectedDifficulty by remember { mutableStateOf(settingsManager.getDefaultDifficulty()) } // NUEVO: Dificultad por defecto
+    var selectedDifficulty by remember { mutableStateOf(settingsManager.getDefaultDifficulty()) }
     var selectedRounds by remember { mutableIntStateOf(1) }
     var selectedColor by remember { mutableStateOf("DEFAULT") }
     var pendingSoundUri by remember { mutableStateOf<String?>(null) }
@@ -376,6 +491,15 @@ fun MainScreen() {
     val activity = context as? android.app.Activity
     LaunchedEffect(readingMode, activity) {
         activity?.window?.let { readingModeManager.applyToWindow(it, readingMode) }
+    }
+
+    // Iconos de la barra de estado/navegación: oscuros en modo claro, claros en modo oscuro
+    LaunchedEffect(AppPalette.isLight, activity) {
+        activity?.window?.let { w ->
+            val controller = WindowCompat.getInsetsController(w, w.decorView)
+            controller.isAppearanceLightStatusBars = AppPalette.isLight
+            controller.isAppearanceLightNavigationBars = AppPalette.isLight
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -460,6 +584,21 @@ fun MainScreen() {
         }
     }
 
+    // Ejecuta el borrado real (cancelar alarma + quitarla de la lista)
+    fun performDelete(alarm: AlarmItem) {
+        cancelAlarm(context, alarm)
+        alarms = alarms.filter { it.id != alarm.id }
+    }
+
+    // Decide si pedir confirmación o borrar directamente
+    fun requestDelete(alarm: AlarmItem) {
+        if (settingsManager.isConfirmDeleteEnabled()) {
+            alarmPendingDelete = alarm
+        } else {
+            performDelete(alarm)
+        }
+    }
+
     Box(modifier = Modifier
         .fillMaxSize()
         .background(CleanBg)) {
@@ -474,7 +613,6 @@ fun MainScreen() {
                     level = currentLevel,
                     xp = currentXp,
                     readingMode = readingMode,
-                    userName = userName,
                     onToggleReading = {
                         readingMode = !readingMode
                         readingModeManager.setEnabled(readingMode)
@@ -498,7 +636,6 @@ fun MainScreen() {
                                 selectedRounds = 1
                                 selectedChallengeType = "MATH"
                                 selectedColor = "DEFAULT"
-                                // NUEVO: Aplicar la dificultad por defecto guardada en el onboarding
                                 selectedDifficulty = settingsManager.getDefaultDifficulty()
                                 showTimePicker = true
                             }
@@ -529,10 +666,7 @@ fun MainScreen() {
                                 alarms = alarms.map { if (it.id == alarm.id) it.copy(isEnabled = enabled) else it }
                                 if (enabled) scheduleAlarm(context, alarm.copy(isEnabled = true)) else cancelAlarm(context, alarm)
                             },
-                            onDelete = { alarm ->
-                                cancelAlarm(context, alarm)
-                                alarms = alarms.filter { it.id != alarm.id }
-                            },
+                            onDelete = { alarm -> requestDelete(alarm) },
                             onEdit = { editingAlarm = it }
                         )
                         AppSection.PROGRESS -> ProgressSection(
@@ -542,10 +676,10 @@ fun MainScreen() {
                         AppSection.SHOP -> ShopSection(
                             points = points,
                             streakManager = streakManager,
-                            onBuy = { cost -> if (streakManager.spendPoints(cost)) { points = streakManager.getPoints() } }
+                            onBuy = { cost -> if (streakManager.spendPoints(cost)) { points = streakManager.getPoints() } },
+                            onAddTestPoints = { streakManager.addPoints(50); points = streakManager.getPoints() }
                         )
                         AppSection.SETTINGS -> SettingsSection(
-                            streakManager = streakManager,
                             settingsManager = settingsManager
                         )
                     }
@@ -553,7 +687,6 @@ fun MainScreen() {
 
                 if (showTimePicker) {
                     CustomTimePickerDialog(
-                        // NUEVO: Pasar la hora habitual guardada en el onboarding
                         initialHour = settingsManager.getHabitualWakeHour(),
                         initialMinute = settingsManager.getHabitualWakeMinute(),
                         onDismiss = { showTimePicker = false },
@@ -595,9 +728,9 @@ fun MainScreen() {
                             editingAlarm = null
                         },
                         onDelete = {
-                            cancelAlarm(context, alarmToEdit)
-                            alarms = alarms.filter { it.id != alarmToEdit.id }
+                            val alarmToRemove = alarmToEdit
                             editingAlarm = null
+                            requestDelete(alarmToRemove)
                         },
                         streakManager = streakManager
                     )
@@ -644,6 +777,39 @@ fun MainScreen() {
                         confirmButton = {
                             TextButton(onClick = { showProfileDialog = false }) {
                                 Text("Entendido", color = WakeBlue, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    )
+                }
+
+                // Diálogo de confirmación de borrado
+                alarmPendingDelete?.let { alarm ->
+                    val timeFormatted = String.format("%02d:%02d", alarm.hour, alarm.minute)
+                    AlertDialog(
+                        onDismissRequest = { alarmPendingDelete = null },
+                        containerColor = CleanSurface,
+                        title = { Text("Eliminar alarma", color = CleanText, fontWeight = FontWeight.Bold) },
+                        text = {
+                            Text(
+                                "¿Seguro que quieres eliminar la alarma de las $timeFormatted" +
+                                        (if (!alarm.label.isNullOrBlank()) " (${alarm.label})" else "") + "?",
+                                color = CleanTextDim
+                            )
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    performDelete(alarm)
+                                    alarmPendingDelete = null
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = WakeRed)
+                            ) {
+                                Text("Eliminar", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { alarmPendingDelete = null }) {
+                                Text("Cancelar", color = CleanTextDim)
                             }
                         }
                     )
@@ -794,20 +960,12 @@ fun EditAlarmDialog(
 
                 Text("Color", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
                 Spacer(modifier = Modifier.height(12.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    val colors = listOf("DEFAULT" to WakeBlue, "RED" to WakeRed)
-                    items(colors) { (hex, c) ->
-                        val isSelected = color == hex
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(c)
-                                .border(if (isSelected) 3.dp else 0.dp, CleanText, CircleShape)
-                                .clickable { color = hex }
-                        )
-                    }
-                }
+                ColorPickerRow(
+                    selectedId = color,
+                    allUnlocked = streakManager.hasExtraColors(),
+                    circleSize = 36,
+                    onSelect = { color = it }
+                )
 
                 Spacer(modifier = Modifier.height(32.dp))
 
@@ -1014,9 +1172,9 @@ fun EmptyState() {
     ) {
         Text("⏰", fontSize = 80.sp, color = CleanSurfaceVariant)
         Spacer(modifier = Modifier.height(24.dp))
-        Text("No hay alarmas próximas", color = CleanText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("No hay alarmas próximas", color = OnBgText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Pulsa el botón + para crear una", color = CleanTextDim, fontSize = 16.sp)
+        Text("Pulsa el botón + para crear una", color = OnBgTextDim, fontSize = 16.sp)
     }
 }
 
@@ -1114,7 +1272,7 @@ fun ProgressSection(context: Context, streak: Int, points: Int, level: Int, xp: 
         .fillMaxSize()
         .verticalScroll(rememberScrollState())
         .padding(24.dp)) {
-        Text("Tu Progreso", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText)
+        Text("Tu Progreso", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = OnBgText)
         Spacer(modifier = Modifier.height(24.dp))
 
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = CleanSurface), shape = RoundedCornerShape(20.dp)) {
@@ -1130,7 +1288,7 @@ fun ProgressSection(context: Context, streak: Int, points: Int, level: Int, xp: 
         }
 
         Spacer(modifier = Modifier.height(32.dp))
-        Text("LOGROS", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = CleanTextDim, letterSpacing = 1.sp)
+        Text("LOGROS", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OnBgTextDim, letterSpacing = 1.sp)
         Spacer(modifier = Modifier.height(16.dp))
         AchievementCatalog.all.forEach { ach ->
             val unlocked = achievementManager.isUnlocked(ach.id)
@@ -1235,22 +1393,12 @@ fun CustomTimePickerDialog(
 
                 Text("Color de la Alarma", fontSize = 14.sp, color = CleanTextDim, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
                 Spacer(modifier = Modifier.height(12.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    val colors = listOf("DEFAULT" to WakeBlue, "RED" to WakeRed)
-                    items(colors) { (hex, color) ->
-                        val isSelected = selectedColor == hex
-                        Box(modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(color)
-                            .border(
-                                if (isSelected) 4.dp else 0.dp,
-                                if (isSelected) CleanText else Color.Transparent,
-                                CircleShape
-                            )
-                            .clickable { onColorSelected(hex) })
-                    }
-                }
+                ColorPickerRow(
+                    selectedId = selectedColor,
+                    allUnlocked = streakManager.hasExtraColors(),
+                    circleSize = 40,
+                    onSelect = onColorSelected
+                )
 
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -1478,7 +1626,7 @@ fun cancelAlarm(context: Context, alarm: AlarmItem) {
 }
 
 @Composable
-fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit) {
+fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit, onAddTestPoints: () -> Unit) {
     var hasInfinite by remember { mutableStateOf(streakManager.hasInfiniteAlarms()) }
     var hasColors by remember { mutableStateOf(streakManager.hasExtraColors()) }
     var hasRounds by remember { mutableStateOf(streakManager.hasExtraRounds()) }
@@ -1486,14 +1634,20 @@ fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit)
     var hasAvatar by remember { mutableStateOf(streakManager.isAvatarUnlocked()) }
     var hasXpMultiplier by remember { mutableStateOf(streakManager.isXpMultiplierUnlocked()) }
 
-    val hasComplete = hasInfinite && hasColors && hasRounds && hasNoAds && hasAvatar && hasXpMultiplier
+    val shopContext = LocalContext.current
+    val themeManager = remember { ThemeManager(shopContext) }
+    val ownedThemes = remember {
+        mutableStateMapOf<String, Boolean>().apply {
+            ThemeCatalog.purchasable.forEach { put(it.id, themeManager.isUnlocked(it.id)) }
+        }
+    }
 
     Column(modifier = Modifier
         .fillMaxSize()
         .verticalScroll(rememberScrollState())
         .padding(24.dp)) {
-        Text("Tienda", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText)
-        Text("Mejoras permanentes", fontSize = 14.sp, color = CleanTextDim)
+        Text("Tienda", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = OnBgText)
+        Text("Mejoras permanentes", fontSize = 14.sp, color = OnBgTextDim)
         Spacer(modifier = Modifier.height(24.dp))
 
         Row(modifier = Modifier
@@ -1505,64 +1659,29 @@ fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit)
             Spacer(modifier = Modifier.width(12.dp))
             Text("$points Puntos", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = CleanText)
         }
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 🧪 BOTÓN DE PRUEBAS: borrar antes de publicar la app
+        Button(
+            onClick = onAddTestPoints,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = CleanSurfaceVariant),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("🧪 Pruebas: +50 🪙", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        }
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (!hasComplete) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = CleanSurface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        2.dp,
-                        Brush.linearGradient(listOf(WakeBlue, Color(0xFF00E5FF))),
-                        RoundedCornerShape(16.dp)
-                    )
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier
-                            .background(WakeBlue.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)) {
-                            Text("OFERTA", color = WakeBlue, fontWeight = FontWeight.Black, fontSize = 12.sp, letterSpacing = 1.sp)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Pack Completo", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Desbloquea todas las mejoras de la tienda de una vez. Ahorra tiempo y puntos.", color = CleanTextDim, fontSize = 13.sp, lineHeight = 18.sp)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = {
-                            if (points >= 100) {
-                                streakManager.unlockCompletePack()
-                                hasInfinite = true; hasColors = true; hasRounds = true
-                                hasNoAds = true; hasAvatar = true; hasXpMultiplier = true
-                                onBuy(100)
-                            }
-                        },
-                        enabled = points >= 100,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = WakeBlue, disabledContainerColor = CleanSurfaceVariant),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Comprar Todo · 100 🪙", color = CleanText, fontWeight = FontWeight.Black, fontSize = 15.sp)
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(32.dp))
-        }
-
-        Text("MEJORAS INDIVIDUALES", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = CleanTextDim, letterSpacing = 1.sp)
+        Text("MEJORAS INDIVIDUALES", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OnBgTextDim, letterSpacing = 1.sp)
         Spacer(modifier = Modifier.height(12.dp))
 
         ShopItemRow("Alarmas Infinitas", "Crea todas las alarmas que quieras sin límite.", 1500, hasInfinite, points >= 1500) {
             if (!hasInfinite) { streakManager.unlockInfiniteAlarms(); hasInfinite = true; onBuy(1500) }
         }
 
-        ShopItemRow("Nuevos Marcadores", "Añade más colores para organizar tus alarmas.", 1200, hasColors, points >= 1200) {
+        ShopItemRow("Nuevos Marcadores", "Desbloquea 10 colores para organizar tus alarmas.", 1200, hasColors, points >= 1200) {
             if (!hasColors) { streakManager.unlockExtraColors(); hasColors = true; onBuy(1200) }
         }
 
@@ -1582,12 +1701,33 @@ fun ShopSection(points: Int, streakManager: StreakManager, onBuy: (Int) -> Unit)
             if (!hasXpMultiplier) { streakManager.unlockXpMultiplier(); hasXpMultiplier = true; onBuy(3000) }
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("TEMAS", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OnBgTextDim, letterSpacing = 1.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        ThemeCatalog.purchasable.forEach { theme ->
+            val owned = ownedThemes[theme.id] == true
+            ShopItemRow(
+                title = "${theme.emoji} ${theme.name}",
+                desc = "Cambia el color de toda la interfaz. Equípalo desde Ajustes.",
+                price = theme.price,
+                isOwned = owned,
+                canAfford = points >= theme.price,
+                ownedLabel = "Comprado"
+            ) {
+                if (!owned && themeManager.unlock(theme.id)) {
+                    ownedThemes[theme.id] = true
+                    onBuy(theme.price)
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(40.dp))
     }
 }
 
 @Composable
-fun ShopItemRow(title: String, desc: String, price: Int, isOwned: Boolean, canAfford: Boolean, onBuy: () -> Unit) {
+fun ShopItemRow(title: String, desc: String, price: Int, isOwned: Boolean, canAfford: Boolean, ownedLabel: String = "Equipado", onBuy: () -> Unit) {
     Row(modifier = Modifier
         .fillMaxWidth()
         .padding(bottom = 16.dp)
@@ -1606,7 +1746,7 @@ fun ShopItemRow(title: String, desc: String, price: Int, isOwned: Boolean, canAf
             colors = ButtonDefaults.buttonColors(containerColor = WakeBlue, disabledContainerColor = CleanSurfaceVariant),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text(if (isOwned) "Equipado" else "Comprar", color = if (isOwned) CleanTextDim else CleanText, fontWeight = FontWeight.Bold)
+            Text(if (isOwned) ownedLabel else "Comprar", color = if (isOwned) CleanTextDim else CleanText, fontWeight = FontWeight.Bold)
         }
     }
 }

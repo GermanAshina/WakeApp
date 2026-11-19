@@ -64,6 +64,11 @@ class SettingsManager(context: Context) {
     fun setConfirmDeleteEnabled(enabled: Boolean) =
         prefs.edit().putBoolean("confirm_delete", enabled).apply()
 
+    // ---- Modo claro / oscuro (false = oscuro, por defecto) ----
+    fun isLightMode(): Boolean = prefs.getBoolean("light_mode", false)
+    fun setLightMode(enabled: Boolean) =
+        prefs.edit().putBoolean("light_mode", enabled).apply()
+
     // ---- Reset ----
     fun clearAll() = prefs.edit().clear().apply()
 }
