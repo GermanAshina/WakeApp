@@ -78,14 +78,14 @@ fun StreakCalendarDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        SimpleDateFormat("MMMM yyyy", Locale("es", "ES")).format(calendar.time).replaceFirstChar { it.uppercase() },
+                        SimpleDateFormat("MMMM yyyy", (if (AppLang.isEnglish) Locale.UK else Locale("es", "ES"))).format(calendar.time).replaceFirstChar { it.uppercase() },
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = CleanText
                     )
 
                     Text(
-                        text = "$streak días",
+                        text = "$streak ${tr("días")}",
                         color = WakeBlue,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
@@ -95,7 +95,7 @@ fun StreakCalendarDialog(
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    listOf("L", "M", "X", "J", "V", "S", "D").forEach { day ->
+                    (if (AppLang.isEnglish) listOf("M", "T", "W", "T", "F", "S", "S") else listOf("L", "M", "X", "J", "V", "S", "D")).forEach { day ->
                         Text(day, color = CleanTextDim, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }

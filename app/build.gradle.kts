@@ -53,4 +53,5 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:13.0.0")
     implementation("androidx.appcompat:appcompat:1.6.1") // o la versión más reciente
+    implementation("com.google.android.gms:play-services-ads:23.6.0")
 }

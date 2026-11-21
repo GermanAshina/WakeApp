@@ -21,9 +21,9 @@ object ThemeCatalog {
 
     val all = listOf(
         AppTheme(DEFAULT_ID, "Por defecto", DEFAULT_ACCENT, Color(0xFF1D9BF0), 0, "🔵"),
-        AppTheme("gold", "Aurum Legendario", Color(0xFFE5A100), Color(0xFFFFB300), THEME_PRICE, "👑"),
-        AppTheme("pink", "Rosa Cyberpunk", Color(0xFFFF4D8D), Color(0xFFFF80AB), THEME_PRICE, "💗"),
-        AppTheme("green", "Verde Matrix", Color(0xFF00C853), Color(0xFF00E676), THEME_PRICE, "💚")
+        AppTheme("gold", "Amarillo Eléctrico", Color(0xFFE5A100), Color(0xFFFFB300), THEME_PRICE, "👑"),
+        AppTheme("pink", "Rosa Pastel", Color(0xFFFF4D8D), Color(0xFFFF80AB), THEME_PRICE, "💗"),
+        AppTheme("green", "Verde Jade", Color(0xFF00C853), Color(0xFF00E676), THEME_PRICE, "💚")
     )
 
     /** Temas que se venden en la Tienda (todos menos el de por defecto). */

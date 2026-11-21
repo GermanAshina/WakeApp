@@ -1,13 +1,15 @@
 package com.german.wakeapp
 
+import android.content.Context
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,252 +22,360 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+
+private val FastLoadingPhases = listOf(
+    "Compilando archivos base..." to 0.25f,
+    "Preparando desafíos y niveles..." to 0.55f,
+    "Ajustando tu configuración inicial..." to 0.82f,
+    "Finalizando calibración..." to 1.0f
+)
 
 @Composable
 fun OnboardingScreen(
     settingsManager: SettingsManager,
     onComplete: () -> Unit
 ) {
-    val context = LocalContext.current
-    var step by remember { mutableIntStateOf(1) }
+    if (settingsManager.isOnboardingCompleted()) {
+        LaunchedEffect(Unit) { onComplete() }
+        return
+    }
 
-    // Estados
-    var selectedLanguage by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val profileManager = remember { ProfileManager(context) }
+    val totalConfigSteps = 4
+
+    // 0 = Portada
+    // 1 = Idioma
+    // 2 = Nombre
+    // 3 = Dificultad
+    // 4 = Hora habitual
+    // 5 = Carga rápida centrada + botón Finalizar al completar
+    var step by remember { mutableIntStateOf(0) }
+
+    var selectedLanguage by remember { mutableStateOf("es") }
     var userName by remember { mutableStateOf("") }
-    var selectedPurpose by remember { mutableStateOf("") }
-    var selectedDifficulty by remember { mutableStateOf("") }
+    var selectedDifficulty by remember { mutableStateOf("MEDIUM") }
     var selectedHour by remember { mutableIntStateOf(7) }
     var selectedMinute by remember { mutableIntStateOf(0) }
+
+    var targetProgress by remember { mutableFloatStateOf(0f) }
+    var statusText by remember { mutableStateOf("Iniciando carga...") }
+    var loadingFinished by remember { mutableStateOf(false) }
+
+    val smoothBarProgress by animateFloatAsState(
+        targetValue = targetProgress,
+        animationSpec = tween(durationMillis = 750, easing = FastOutSlowInEasing),
+        label = "fast_onboarding_progress"
+    )
+
+    LaunchedEffect(step) {
+        if (step == 5) {
+            loadingFinished = false
+            targetProgress = 0f
+
+            val cleanName = userName.trim()
+            AppLang.language = selectedLanguage.ifBlank { "es" }
+            settingsManager.setLanguage(AppLang.language)
+            settingsManager.setUserName(cleanName)
+            settingsManager.setDefaultDifficulty(selectedDifficulty.ifBlank { "MEDIUM" })
+            settingsManager.setHabitualWakeTime(selectedHour, selectedMinute)
+
+            if (cleanName.isNotBlank()) {
+                profileManager.setName(cleanName)
+            }
+
+            context.getSharedPreferences("wakeapp_onboarding_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putString("user_name", cleanName)
+                .putString("default_difficulty", selectedDifficulty)
+                .putInt("habitual_hour", selectedHour)
+                .putInt("habitual_minute", selectedMinute)
+                .putBoolean("onboarding_finished", true)
+                .apply()
+
+            context.getSharedPreferences("wakeapp_profile_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putString("user_name", cleanName)
+                .apply()
+
+            for ((phrase, value) in FastLoadingPhases) {
+                statusText = phrase
+                targetProgress = value
+                delay(850L)
+            }
+            loadingFinished = true
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(CleanBg, Color(0xFF141414))
+                    colors = listOf(CleanBg, WakeBlue.copy(alpha = 0.08f), Color(0xFF101012))
                 )
             )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-                .systemBarsPadding(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Indicador de progreso (bolitas)
-            Row(
-                modifier = Modifier.padding(top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                for (i in 1..5) {
-                    Box(
-                        modifier = Modifier
-                            .size(if (i == step) 24.dp else 8.dp, 8.dp)
-                            .clip(CircleShape)
-                            .background(if (i == step) WakeBlue else if (i < step) WakeBlue.copy(alpha = 0.4f) else CleanSurfaceVariant)
-                    )
+        when (step) {
+            0 -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 28.dp, vertical = 36.dp)
+                        .systemBarsPadding(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⏰", fontSize = 54.sp)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text(
+                            text = "Esto es WakeApp",
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = CleanText,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Configura lo esencial en un momento y entra a despertar con cabeza.",
+                            fontSize = 15.5.sp,
+                            color = CleanTextDim,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 23.sp
+                        )
+                    }
+
+                    Button(
+                        onClick = { step = 1 },
+                        colors = ButtonDefaults.buttonColors(containerColor = WakeBlue, contentColor = CleanText),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                    ) {
+                        Text("Comenzar", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.weight(0.5f))
-
-            // --- CONTENIDO ANIMADO ---
-            AnimatedContent(
-                targetState = step,
-                transitionSpec = {
-                    fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
-                },
-                label = "onboarding_step",
-                modifier = Modifier.weight(8f)
-            ) { currentStep ->
+            5 -> {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp, vertical = 32.dp)
+                        .systemBarsPadding(),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    when (currentStep) {
-                        1 -> {
-                            // PASO 1: IDIOMA
-                            Text("Selecciona tu idioma", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Select your language", fontSize = 16.sp, color = CleanTextDim, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(48.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                            LanguageOption(
-                                flag = "🇪🇸", name = "Español",
-                                isSelected = selectedLanguage == "es",
-                                onClick = { selectedLanguage = "es" }
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            LanguageOption(
-                                flag = "🇬🇧", name = "English",
-                                isSelected = selectedLanguage == "en",
-                                onClick = { selectedLanguage = "en" }
-                            )
-                        }
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "Preparando tu experiencia",
+                            fontSize = 25.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CleanText,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = statusText,
+                            fontSize = 14.sp,
+                            color = CleanTextDim,
+                            textAlign = TextAlign.Center
+                        )
 
-                        2 -> {
-                            // PASO 2: NOMBRE
-                            Text("¿Cómo te llamas?", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Usaremos tu nombre para saludarte", fontSize = 16.sp, color = CleanTextDim, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(48.dp))
-
-                            OutlinedTextField(
-                                value = userName,
-                                onValueChange = { if (it.length <= 15) userName = it },
-                                label = { Text("Tu nombre (opcional)") },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = WakeBlue,
-                                    unfocusedBorderColor = CleanSurfaceVariant,
-                                    focusedTextColor = CleanText,
-                                    unfocusedTextColor = CleanText,
-                                    cursorColor = WakeBlue
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier.fillMaxWidth(0.85f)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(12.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(CleanSurfaceVariant)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(smoothBarProgress.coerceIn(0f, 1f))
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(WakeBlue)
                             )
                         }
 
-                        3 -> {
-                            // PASO 3: PROPÓSITO
-                            Text("¿Para qué usarás WakeApp?", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Elige tu objetivo principal", fontSize = 16.sp, color = CleanTextDim, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(32.dp))
+                        Text(
+                            text = "${(smoothBarProgress * 100).toInt()}%",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CleanText,
+                            textAlign = TextAlign.Center
+                        )
+                    }
 
-                            PurposeOption(
-                                emoji = "🚀", title = "Productividad",
-                                subtitle = "Levantarme con energía para rendir más",
-                                isSelected = selectedPurpose == "productividad",
-                                onClick = { selectedPurpose = "productividad" }
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            PurposeOption(
-                                emoji = "🌅", title = "Madrugar",
-                                subtitle = "Quiero levantarme más temprano",
-                                isSelected = selectedPurpose == "madrugar",
-                                onClick = { selectedPurpose = "madrugar" }
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            PurposeOption(
-                                emoji = "🔥", title = "Disciplina",
-                                subtitle = "Obligarme a despertarme sí o sí",
-                                isSelected = selectedPurpose == "obligatoria",
-                                onClick = { selectedPurpose = "obligatoria" }
+                    Button(
+                        onClick = {
+                            val cleanName = userName.trim()
+                            if (cleanName.isNotBlank()) {
+                                profileManager.setName(cleanName)
+                            }
+                            settingsManager.setOnboardingCompleted(true)
+                            onComplete()
+                        },
+                        enabled = loadingFinished,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = WakeBlue,
+                            contentColor = CleanText,
+                            disabledContainerColor = CleanSurfaceVariant,
+                            disabledContentColor = CleanTextDim
+                        ),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                    ) {
+                        Text(
+                            text = if (loadingFinished) "Finalizar" else "Cargando...",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+            }
+
+            else -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp)
+                        .systemBarsPadding(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        for (i in 1..totalConfigSteps) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(
+                                        if (i == step) WakeBlue
+                                        else if (i < step) WakeBlue.copy(alpha = 0.45f)
+                                        else CleanSurfaceVariant
+                                    )
                             )
                         }
+                    }
 
-                        4 -> {
-                            // PASO 4: DIFICULTAD POR DEFECTO
-                            Text("¿Qué dificultad prefieres?", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Será la que uses por defecto al crear alarmas", fontSize = 16.sp, color = CleanTextDim, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Paso $step de $totalConfigSteps", fontSize = 12.sp, color = CleanTextDim)
 
-                            DifficultyOption("🟢", "Fácil", "Cálculos sencillos, frases cortas", "EASY", selectedDifficulty) { selectedDifficulty = it }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            DifficultyOption("🟡", "Media", "Cálculos medios, frases normales", "MEDIUM", selectedDifficulty) { selectedDifficulty = it }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            DifficultyOption("🟠", "Difícil", "Multiplicaciones, frases largas", "HARD", selectedDifficulty) { selectedDifficulty = it }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            DifficultyOption("🔴", "Extrema", "Operaciones complejas, textos exactos", "EXTREME", selectedDifficulty) { selectedDifficulty = it }
-                        }
+                    AnimatedContent(
+                        targetState = step,
+                        transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(180)) },
+                        label = "onboarding_clean_steps",
+                        modifier = Modifier.weight(1f).fillMaxWidth()
+                    ) { currentStep ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(vertical = 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            when (currentStep) {
+                                1 -> {
+                                    Text("Selecciona tu idioma", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText)
+                                    Spacer(modifier = Modifier.height(28.dp))
+                                    LanguageOption("🇪🇸", "Español", selectedLanguage == "es") {
+                                        selectedLanguage = "es"; AppLang.language = "es"
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    LanguageOption("🇬🇧", "English", selectedLanguage == "en") {
+                                        selectedLanguage = "en"; AppLang.language = "en"
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    LanguageOption("🇫🇷", "Français", selectedLanguage == "fr") {
+                                        selectedLanguage = "fr"; AppLang.language = "fr"
+                                    }
+                                }
 
-                        5 -> {
-                            // PASO 5: HORA HABITUAL
-                            Text("¿A qué hora sueles despertarte?", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = CleanText, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("La usaremos como punto de partida al crear tus alarmas", fontSize = 15.sp, color = CleanTextDim, textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(32.dp))
+                                2 -> {
+                                    Text("¿Cómo te llamas?", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText)
+                                    Spacer(modifier = Modifier.height(28.dp))
+                                    OutlinedTextField(
+                                        value = userName,
+                                        onValueChange = { if (it.length <= 15) userName = it },
+                                        label = { Text("Tu nombre") },
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = WakeBlue,
+                                            unfocusedBorderColor = CleanSurfaceVariant,
+                                            focusedTextColor = CleanText,
+                                            unfocusedTextColor = CleanText,
+                                            cursorColor = WakeBlue
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.fillMaxWidth(0.88f)
+                                    )
+                                }
 
-                            Row(
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                NumberPicker(
-                                    value = selectedHour,
-                                    range = 0..23,
-                                    onValueChange = { selectedHour = it }
-                                )
-                                Text(
-                                    ":",
-                                    fontSize = 40.sp,
-                                    fontWeight = FontWeight.Light,
-                                    color = CleanText,
-                                    modifier = Modifier.padding(horizontal = 8.dp)
-                                )
-                                NumberPicker(
-                                    value = selectedMinute,
-                                    range = 0..59,
-                                    onValueChange = { selectedMinute = it }
-                                )
+                                3 -> {
+                                    Text("Dificultad por defecto", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = CleanText)
+                                    Spacer(modifier = Modifier.height(24.dp))
+                                    DifficultyOption("🟢", "Fácil", "Cálculos sencillos, frases cortas", "EASY", selectedDifficulty) { selectedDifficulty = it }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    DifficultyOption("🟡", "Media", "Cálculos medios, frases normales", "MEDIUM", selectedDifficulty) { selectedDifficulty = it }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    DifficultyOption("🟠", "Difícil", "Multiplicaciones, frases largas", "HARD", selectedDifficulty) { selectedDifficulty = it }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    DifficultyOption("🔴", "Extrema", "Operaciones complejas, textos exactos", "EXTREME", selectedDifficulty) { selectedDifficulty = it }
+                                }
+
+                                4 -> {
+                                    Text("¿A qué hora sueles despertar?", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = CleanText)
+                                    Spacer(modifier = Modifier.height(28.dp))
+                                    Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                        NumberPicker(value = selectedHour, range = 0..23, onValueChange = { selectedHour = it })
+                                        Text(":", fontSize = 40.sp, fontWeight = FontWeight.Light, color = CleanText, modifier = Modifier.padding(horizontal = 8.dp))
+                                        NumberPicker(value = selectedMinute, range = 0..59, onValueChange = { selectedMinute = it })
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            }
 
-            Spacer(modifier = Modifier.weight(2f))
-
-            // --- BOTONES ---
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 24.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (step > 1) {
-                    TextButton(onClick = { step-- }) {
-                        Text("Atrás", color = CleanTextDim, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    }
-                } else {
-                    Spacer(modifier = Modifier.width(1.dp))
-                }
-
-                val canProceed = when (step) {
-                    1 -> selectedLanguage.isNotBlank()
-                    2 -> true // Nombre opcional
-                    3 -> selectedPurpose.isNotBlank()
-                    4 -> selectedDifficulty.isNotBlank()
-                    5 -> true // La hora siempre es válida
-                    else -> false
-                }
-
-                Button(
-                    onClick = {
-                        if (step < 5) {
-                            step++
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (step > 1) {
+                            TextButton(onClick = { step-- }) {
+                                Text("Atrás", color = CleanTextDim, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            }
                         } else {
-                            // Guardar todo
-                            settingsManager.setLanguage(selectedLanguage)
-                            settingsManager.setUserName(userName.trim())
-                            settingsManager.setPurpose(selectedPurpose)
-                            settingsManager.setDefaultDifficulty(selectedDifficulty)
-                            settingsManager.setHabitualWakeTime(selectedHour, selectedMinute)
-                            settingsManager.setOnboardingCompleted(true)
-                            onComplete()
+                            Spacer(modifier = Modifier.width(1.dp))
                         }
-                    },
-                    enabled = canProceed,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = WakeBlue,
-                        disabledContainerColor = CleanSurfaceVariant
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .height(56.dp)
-                        .width(if (step == 5) 160.dp else 120.dp)
-                ) {
-                    Text(
-                        text = if (step == 5) "Empezar" else "Siguiente",
-                        color = if (canProceed) CleanText else CleanTextDim,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
+
+                        Button(
+                            onClick = { step++ },
+                            colors = ButtonDefaults.buttonColors(containerColor = WakeBlue),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.height(54.dp).width(145.dp)
+                        ) {
+                            Text(
+                                text = if (step == totalConfigSteps) "Cargar app" else "Siguiente",
+                                color = CleanText,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -276,12 +386,12 @@ fun OnboardingScreen(
 fun LanguageOption(flag: String, name: String, isSelected: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
-            .fillMaxWidth(0.85f)
+            .fillMaxWidth(0.88f)
             .clip(RoundedCornerShape(20.dp))
-            .background(if (isSelected) WakeBlue.copy(alpha = 0.15f) else CleanSurface)
+            .background(if (isSelected) WakeBlue.copy(alpha = 0.16f) else CleanSurface)
             .border(
                 width = if (isSelected) 2.dp else 1.dp,
-                color = if (isSelected) WakeBlue else Color.Transparent,
+                color = if (isSelected) WakeBlue else CleanSurfaceVariant.copy(alpha = 0.6f),
                 shape = RoundedCornerShape(20.dp)
             )
             .clickable { onClick() }
@@ -290,40 +400,8 @@ fun LanguageOption(flag: String, name: String, isSelected: Boolean, onClick: () 
     ) {
         Text(flag, fontSize = 32.sp)
         Spacer(modifier = Modifier.width(16.dp))
-        Text(name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = CleanText)
-    }
-}
-
-@Composable
-fun PurposeOption(emoji: String, title: String, subtitle: String, isSelected: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(if (isSelected) WakeBlue.copy(alpha = 0.15f) else CleanSurface)
-            .border(
-                width = if (isSelected) 2.dp else 1.dp,
-                color = if (isSelected) WakeBlue else Color.Transparent,
-                shape = RoundedCornerShape(20.dp)
-            )
-            .clickable { onClick() }
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(if (isSelected) WakeBlue.copy(alpha = 0.3f) else CleanSurfaceVariant),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(emoji, fontSize = 24.sp)
-        }
-        Spacer(modifier = Modifier.width(16.dp))
-        Column {
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = CleanText)
-            Text(subtitle, fontSize = 13.sp, color = CleanTextDim, lineHeight = 18.sp)
-        }
+        Text(name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = CleanText, modifier = Modifier.weight(1f))
+        if (isSelected) Text("✓", color = WakeBlue, fontWeight = FontWeight.Bold, fontSize = 20.sp)
     }
 }
 
@@ -341,10 +419,10 @@ fun DifficultyOption(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(if (isSelected) WakeBlue.copy(alpha = 0.15f) else CleanSurface)
+            .background(if (isSelected) WakeBlue.copy(alpha = 0.16f) else CleanSurface)
             .border(
                 width = if (isSelected) 2.dp else 1.dp,
-                color = if (isSelected) WakeBlue else Color.Transparent,
+                color = if (isSelected) WakeBlue else CleanSurfaceVariant.copy(alpha = 0.6f),
                 shape = RoundedCornerShape(16.dp)
             )
             .clickable { onSelect(difficultyId) }
@@ -357,8 +435,6 @@ fun DifficultyOption(
             Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = CleanText)
             Text(subtitle, fontSize = 12.sp, color = CleanTextDim)
         }
-        if (isSelected) {
-            Text("✓", color = WakeBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-        }
+        if (isSelected) Text("✓", color = WakeBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
     }
 }

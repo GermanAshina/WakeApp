@@ -56,13 +56,29 @@ class AchievementManager(context: Context) {
 
     fun getProgress(achievement: Achievement, currentStreak: Int, currentPoints: Int): Int {
         if (isUnlocked(achievement.id)) return achievement.required
+
         return when (achievement.id) {
-            "rich_10k" -> currentPoints.coerceIn(0, achievement.required)
+            // --- Progreso basado en la Racha ---
+            "first_wake", "streak_3", "streak_7", "streak_21", "streak_30", "streak_100" ->
+                currentStreak.coerceIn(0, achievement.required)
+
+            // --- Progreso basado en Puntos ---
+            "rich_10k" ->
+                currentPoints.coerceIn(0, achievement.required)
+
+            // --- Progreso basado en contadores de minijuegos ---
             "math_10" -> prefs.getInt("count_MATH", 0).coerceIn(0, achievement.required)
             "text_10" -> prefs.getInt("count_TEXT", 0).coerceIn(0, achievement.required)
             "tracing_10" -> prefs.getInt("count_TRACING", 0).coerceIn(0, achievement.required)
+
+            // --- Progreso basado en compras ---
             "shop_10" -> prefs.getInt("shop_purchases", 0).coerceIn(0, achievement.required)
-            else -> currentStreak.coerceIn(0, achievement.required)
+
+            // --- Logros de acción única (0 si no está desbloqueado) ---
+            "rounds_4", "early_7am", "shop_buyer", "ad_watcher" -> 0
+
+            // --- Fallback por seguridad ---
+            else -> 0
         }
     }
 

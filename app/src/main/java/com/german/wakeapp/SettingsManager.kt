@@ -22,7 +22,7 @@ class SettingsManager(context: Context) {
     fun getPurpose(): String = prefs.getString("user_purpose", "") ?: ""
     fun setPurpose(purpose: String) = prefs.edit().putString("user_purpose", purpose).apply()
 
-    // ---- NUEVOS: Dificultad por defecto y hora habitual ----
+    // ---- Dificultad por defecto y hora habitual ----
     fun getDefaultDifficulty(): String = prefs.getString("default_difficulty", "MEDIUM") ?: "MEDIUM"
     fun setDefaultDifficulty(difficulty: String) =
         prefs.edit().putString("default_difficulty", difficulty).apply()
@@ -64,10 +64,14 @@ class SettingsManager(context: Context) {
     fun setConfirmDeleteEnabled(enabled: Boolean) =
         prefs.edit().putBoolean("confirm_delete", enabled).apply()
 
-    // ---- Modo claro / oscuro (false = oscuro, por defecto) ----
+    // ---- Modo claro / oscuro ----
     fun isLightMode(): Boolean = prefs.getBoolean("light_mode", false)
     fun setLightMode(enabled: Boolean) =
         prefs.edit().putBoolean("light_mode", enabled).apply()
+
+    // ---- Perfil: helpers de integración ----
+    fun getProfileName(): String = prefs.getString("profile_name", null) ?: getUserName()
+    fun setProfileName(name: String) = prefs.edit().putString("profile_name", name).apply()
 
     // ---- Reset ----
     fun clearAll() = prefs.edit().clear().apply()

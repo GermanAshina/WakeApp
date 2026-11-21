@@ -52,6 +52,9 @@ class ChallengeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Esta pantalla puede abrirse sola (alarma con la app cerrada): carga el idioma guardado
+        AppLang.language = SettingsManager(this).getLanguage()
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -331,7 +334,7 @@ fun StandardChallengeScreen(challengeType: String, difficulty: String, onSuccess
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
-    val phrases = remember(difficulty) {
+    val phrasesEs = remember(difficulty) {
         when (difficulty) {
             "EASY" -> listOf("despierta ya", "hora de levantarse", "buenos dias")
             "MEDIUM" -> listOf("despierta, niñato", "niñato, empieza a despertar", "o te despiertas o te zurro")
@@ -340,6 +343,18 @@ fun StandardChallengeScreen(challengeType: String, difficulty: String, onSuccess
             else -> listOf("despierta ya", "hora de levantarse")
         }
     }
+
+    // Frases en inglés (sin apóstrofes ni signos raros para que sea fácil escribirlas)
+    val phrasesEn = remember(difficulty) {
+        when (difficulty) {
+            "EASY" -> listOf("wake up now", "time to get up", "good morning")
+            "MEDIUM" -> listOf("wake up, kiddo", "kiddo, start waking up", "wake up or else")
+            "HARD" -> listOf("Wake up RIGHT NOW, kiddo, or no coffee!", "WakeApp: Error 404, sleep not found.", "Get up, 2026 is waiting for you!")
+            "EXTREME" -> listOf("CRITICAL WARNING: Severe procrastination risk detected in the core!", "Extreme mode demands immediate total wakefulness, no excuses or delays!", "Protocol 0-Alpha: Type this exact line to authorise the shutdown.")
+            else -> listOf("wake up now", "time to get up")
+        }
+    }
+    val phrases = if (AppLang.isEnglish) phrasesEn else phrasesEs
 
     val mathProblem = remember(difficulty) {
         when (difficulty) {
@@ -495,7 +510,7 @@ fun TracingChallengeScreen(difficulty: String, onSuccess: () -> Unit) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(modifier = Modifier.height(8.dp))
-            ChallengeHeader(emoji = "⌖", title = "DELINEADO PRECISO", subtitle = "Traza la figura: ${currentShape.title}", accent = NeonGreen)
+            ChallengeHeader(emoji = "⌖", title = "DELINEADO PRECISO", subtitle = "${tr("Traza la figura:")} ${tr(currentShape.title)}", accent = NeonGreen)
         }
 
         Box(

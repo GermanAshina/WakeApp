@@ -75,6 +75,8 @@ class AlarmService : Service() {
 
     private fun buildNotification(): Notification {
         val challengeIntent = challengeIntent()
+        // CAMBIO: la función tr() ahora espera un String (el código de idioma)
+        val lang = SettingsManager(this).getLanguage()
         val pendingIntent = PendingIntent.getActivity(
             this, 0, challengeIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -82,19 +84,20 @@ class AlarmService : Service() {
 
         val openAction = NotificationCompat.Action.Builder(
             android.R.drawable.ic_lock_idle_alarm,
-            "Resolver desafío",
+            tr("Resolver desafío", lang),
             pendingIntent
         ).build()
 
-        val roundsText = if (currentRounds > 1) " · $currentRounds rondas" else ""
+        val roundsText = if (currentRounds > 1) " · $currentRounds ${tr("rondas", lang)}" else ""
         val labelText = if (!currentAlarmLabel.isNullOrBlank()) "🏷 $currentAlarmLabel · " else ""
+        val tapText = tr("Toca para resolver el desafío", lang)
         val notifText = if (!currentSoundName.isNullOrBlank())
-            "$labelText🎵 $currentSoundName$roundsText — Toca para resolver el desafío."
+            "$labelText🎵 $currentSoundName$roundsText — $tapText."
         else
-            "$labelText Toca para resolver el desafío$roundsText."
+            "$labelText $tapText$roundsText."
 
         return NotificationCompat.Builder(this, CHANNEL_ALARM)
-            .setContentTitle("¡Alarma Sonando!")
+            .setContentTitle(tr("¡Alarma Sonando!", lang))
             .setContentText(notifText)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -134,7 +137,8 @@ class AlarmService : Service() {
             if (existing == null) {
                 val channel = NotificationChannel(
                     CHANNEL_ALARM,
-                    "Servicio de Alarma Activo",
+                    // CAMBIO: tr() ahora espera String
+                    tr("Servicio de Alarma Activo", SettingsManager(this).getLanguage()),
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
                     setShowBadge(false)
