@@ -28,7 +28,7 @@ fun ProfileAvatar(
     onClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
-    val avatarId = profileManager.equippedAvatar
+    val avatarId = profileManager.getEquipped(ProfileCategory.AVATAR)
     val avatar = ProfileCatalog.byId(avatarId) ?: ProfileCatalog.avatars.first()
     val resName = if (avatar.renderKey.startsWith("drawable:")) {
         avatar.renderKey.removePrefix("drawable:")

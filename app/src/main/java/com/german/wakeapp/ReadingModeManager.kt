@@ -26,11 +26,7 @@ class ReadingModeManager(context: Context) {
         prefs.edit().putBoolean("reading_enabled", enabled).apply()
     }
 
-    /**
-     * Aplica el modo lectura a una ventana dada.
-     * - Si está activo: baja el brillo al 1% y aplica un overlay rojizo.
-     * - Si está desactivado: restaura el brillo normal y quita el overlay.
-     */
+
     fun applyToWindow(window: Window, enabled: Boolean) {
         val params = window.attributes
         if (enabled) {
@@ -41,10 +37,7 @@ class ReadingModeManager(context: Context) {
         window.attributes = params
     }
 
-    /**
-     * Devuelve el valor de brillo manual si el usuario lo ha configurado.
-     * Por defecto 1%.
-     */
+
     fun getCustomBrightness(): Float =
         prefs.getFloat("reading_brightness", MIN_BRIGHTNESS)
 

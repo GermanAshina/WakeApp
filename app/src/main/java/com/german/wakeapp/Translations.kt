@@ -277,7 +277,21 @@ private val EN: Map<String, String> = mapOf(
             "By completing challenges you gain XP to level up, and by unlocking achievements you earn points (🪙) to spend in the Shop.",
     "¿Puedo usar mis propios archivos de audio?" to "Can I use my own audio files?",
     "Sí, al configurar una alarma puedes elegir un archivo de audio desde tu dispositivo." to
-            "Yes, when configuring an alarm you can choose an audio file from your device."
+            "Yes, when configuring an alarm you can choose an audio file from your device.",
+    "Ajustes y Personalización" to "Settings & Personalisation",
+    "Tu cuenta" to "Your account",
+    "Usuario" to "User",
+    "WakeApp Pro" to "WakeApp Pro",
+    "Desbloquea todo el potencial" to "Unlock the full potential",
+    "Mejorar" to "Upgrade",
+    "Bloquear cierre forzado" to "Block force close",
+    "Evita que cierres la app para apagar la alarma." to "Stop you from closing the app to turn off the alarm.",
+    "APARIENCIA" to "APPEARANCE",
+    "Tema de la app" to "App theme",
+    "Tono de alarma" to "Alarm tone",
+    "Notificación" to "Notification",
+    "Tono de llamada" to "Ringtone",
+    "Preguntar antes de eliminar una alarma." to "Ask before deleting an alarm."
 )
 
 private val FR: Map<String, String> = mapOf(
@@ -503,5 +517,20 @@ private val FR: Map<String, String> = mapOf(
             "En réussissant des défis, vous gagnez de l'XP pour monter de niveau, et en débloquant des succès, vous obtenez des points (🪙) à dépenser dans la Boutique.",
     "¿Puedo usar mis propios archivos de audio?" to "Puis-je utiliser mes propres fichiers audio ?",
     "Sí, al configurar una alarma puedes elegir un archivo de audio desde tu dispositivo." to
-            "Oui, lors de la configuration d'une alarme, vous pouvez choisir un fichier audio depuis votre appareil."
+            "Oui, lors de la configuration d'une alarme, vous pouvez choisir un fichier audio depuis votre appareil.",
+    // ---------- Réglages Unifiés ----------
+    "Ajustes y Personalización" to "Réglages et Personnalisation",
+    "Tu cuenta" to "Votre compte",
+    "Usuario" to "Utilisateur",
+    "WakeApp Pro" to "WakeApp Pro",
+    "Desbloquea todo el potencial" to "Débloquez tout le potentiel",
+    "Mejorar" to "Améliorer",
+    "Bloquear cierre forzado" to "Bloquer la fermeture forcée",
+    "Evita que cierres la app para apagar la alarma." to "Empêche de fermer l'application pour éteindre l'alarme.",
+    "APARIENCIA" to "APPARENCE",
+    "Tema de la app" to "Thème de l'application",
+    "Tono de alarma" to "Sonnerie d'alarme",
+    "Notificación" to "Notification",
+    "Tono de llamada" to "Sonnerie d'appel",
+    "Preguntar antes de eliminar una alarma." to "Demander avant de supprimer une alarme."
 )

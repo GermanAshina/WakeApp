@@ -20,7 +20,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,143 +49,86 @@ fun ProfileScreen(
 
     androidx.activity.compose.BackHandler(enabled = true) { onClose() }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().background(CleanBg),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 40.dp)
-    ) {
-        // ============ CABECERA SIMPLE SIN BANNER ============
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(CleanSurface)
-                        .border(1.dp, CleanSurfaceVariant, CircleShape)
-                        .clickable { onClose() },
-                    contentAlignment = Alignment.Center
-                ) { Text("←", color = CleanText, fontSize = 20.sp) }
-
-                Text("Perfil", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = CleanText)
-
-                Spacer(modifier = Modifier.size(40.dp))
-            }
-        }
-
-        // ============ AVATAR + NOMBRE ============
-        item {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                ProfileAvatar(
-                    profileManager = profileManager,
-                    size = 110,
-                    onClick = { customizingCategory = ProfileCategory.AVATAR }
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val displayName = profileManager.getName().ifBlank { "WakeApp User" }
-                    Text(
-                        text = displayName,
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.Black,
-                        color = CleanText,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier.size(28.dp).clip(CircleShape).background(CleanSurface).clickable { editingName = true },
-                        contentAlignment = Alignment.Center
-                    ) { Text("✎", fontSize = 12.sp, color = CleanTextDim) }
-                }
-            }
-        }
-
-        // ============ ESTADÍSTICAS ============
-        item {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
-                Text("ESTADÍSTICAS", fontSize = 12.sp, fontWeight = FontWeight.Black, color = CleanTextDim, letterSpacing = 1.5.sp)
-                Spacer(modifier = Modifier.height(12.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ProfileStatCard("🌅", "Días despertado", "$totalWakeUps", Modifier.weight(1f))
-                        ProfileStatCard("🔥", "Mejor racha", "$bestStreak", Modifier.weight(1f))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ProfileStatCard("⭐", "Nivel", "$level", Modifier.weight(1f))
-                        ProfileStatCard("🪙", "Puntos", "$points", Modifier.weight(1f))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ProfileStatCard("⏰", "Alarmas creadas", "$alarmsCreated", Modifier.weight(1f))
-                        ProfileStatCard("🏆", "Logros", "${achievementManager.unlockedCount()}", Modifier.weight(1f))
-                    }
-                }
-            }
-        }
-
-        // ============ PROGRESO DEL PERFIL ============
-        item {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Brush.linearGradient(listOf(Color(0xFF1A1040), Color(0xFF2A1B5C))))
-                        .border(1.dp, Color(0xFF7C4DFF).copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-                        .padding(18.dp)
+    OnboardingDarkBlueBackground {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 16.dp, bottom = 40.dp)
+        ) {
+            // ============ CABECERA ============
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🖼️", fontSize = 24.sp)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("AVATARES DESBLOQUEADOS", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color(0xFFB39DDB), letterSpacing = 1.5.sp)
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text("$unlockedProfile de $totalProfile avatares", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
-                            }
-                            Text("${if (totalProfile > 0) (unlockedProfile * 100 / totalProfile) else 0}%", fontSize = 22.sp, fontWeight = FontWeight.Black, color = Color(0xFFB39DDB))
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        val frac = if (totalProfile > 0) unlockedProfile.toFloat() / totalProfile else 0f
-                        Box(modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.12f))) {
-                            Box(modifier = Modifier.fillMaxWidth(frac).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(Brush.horizontalGradient(listOf(Color(0xFF7C4DFF), Color(0xFFB39DDB)))))
-                        }
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(CircleShape).background(CleanSurface).border(1.dp, CleanSurfaceVariant, CircleShape).clickable { onClose() },
+                        contentAlignment = Alignment.Center
+                    ) { Text("←", color = CleanText, fontSize = 20.sp) }
+                    Text("Perfil", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = CleanText)
+                    Spacer(modifier = Modifier.size(40.dp))
+                }
+            }
+
+            // ============ AVATAR + NOMBRE ============
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    ProfileAvatar(profileManager = profileManager, size = 96, onClick = { customizingCategory = ProfileCategory.AVATAR })
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = profileManager.getName().ifBlank { "WakeApp User" },
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CleanText
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier.size(28.dp).clip(CircleShape).background(CleanSurfaceVariant).clickable { editingName = true },
+                            contentAlignment = Alignment.Center
+                        ) { Text("✎", fontSize = 12.sp, color = CleanText) }
                     }
                 }
             }
-        }
 
-        // ============ CATEGORÍA AVATAR ============
-        item {
-            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-                Text("PERSONALIZAR", fontSize = 12.sp, fontWeight = FontWeight.Black, color = CleanTextDim, letterSpacing = 1.5.sp)
-                Spacer(modifier = Modifier.height(12.dp))
-                val cat = ProfileCategory.AVATAR
-                val equippedItem = ProfileCatalog.byId(profileManager.getEquipped(cat))
-                val unlockedCount = ProfileCatalog.byCategory(cat).count { profileManager.isUnlocked(it.id) }
-                val totalCount = ProfileCatalog.byCategory(cat).size
-                ProfileCategoryRow(cat, equippedItem?.name ?: "-", unlockedCount, totalCount) { customizingCategory = cat }
-            }
-        }
-
-        // ============ ACCIONES ============
-        item {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = { showCalendar = true }, modifier = Modifier.fillMaxWidth().height(54.dp), colors = ButtonDefaults.buttonColors(containerColor = CleanSurface), shape = RoundedCornerShape(16.dp)) {
-                    Text("📅  Ver mi calendario de racha", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            // ============ ESTADÍSTICAS SIMPLES ============
+            item {
+                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                    Text("ESTADÍSTICAS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CleanTextDim, letterSpacing = 1.5.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        ProfileRow("Días despertado", "$totalWakeUps")
+                        ProfileRow("Mejor racha", "$bestStreak")
+                        ProfileRow("Nivel actual", "$level")
+                        ProfileRow("Puntos acumulados", "$points")
+                        ProfileRow("Alarmas creadas", "$alarmsCreated")
+                    }
                 }
-                Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(54.dp), colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(16.dp)) {
-                    Text("Volver al inicio", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+
+            // ============ PERSONALIZAR ============
+            item {
+                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                    Text("PERSONALIZAR", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CleanTextDim, letterSpacing = 1.5.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    val cat = ProfileCategory.AVATAR
+                    val equippedItem = ProfileCatalog.byId(profileManager.getEquipped(cat))
+                    ProfileCategoryRow(cat, equippedItem?.name ?: "-", unlockedProfile, totalProfile) { customizingCategory = cat }
+                }
+            }
+
+            // ============ ACCIONES ============
+            item {
+                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { showCalendar = true }, modifier = Modifier.fillMaxWidth().height(50.dp), colors = ButtonDefaults.buttonColors(containerColor = CleanSurface), shape = RoundedCornerShape(14.dp)) {
+                        Text("📅  Ver calendario", color = CleanText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
+                    Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(50.dp), colors = ButtonDefaults.buttonColors(containerColor = WakeBlue), shape = RoundedCornerShape(14.dp)) {
+                        Text("Cerrar", color = CleanText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
                 }
             }
         }
@@ -205,15 +147,13 @@ fun ProfileScreen(
     if (editingName) {
         var nameText by remember { mutableStateOf(profileManager.getName()) }
         AlertDialog(
-            onDismissRequest = { editingName = false },
-            containerColor = CleanSurface,
+            onDismissRequest = { editingName = false }, containerColor = CleanSurface,
             title = { Text("Tu nombre", color = CleanText, fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
                     value = nameText,
                     onValueChange = { if (it.length <= 15) nameText = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = WakeBlue, unfocusedBorderColor = CleanSurfaceVariant, focusedTextColor = CleanText, unfocusedTextColor = CleanText, cursorColor = WakeBlue),
                     shape = RoundedCornerShape(12.dp)
                 )
@@ -228,16 +168,18 @@ fun ProfileScreen(
     }
 }
 
+// Fila simple para las estadísticas
 @Composable
-private fun ProfileStatCard(emoji: String, label: String, value: String, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.clip(RoundedCornerShape(16.dp)).background(CleanSurface).border(1.dp, CleanSurfaceVariant, RoundedCornerShape(16.dp)).padding(14.dp)) {
-        Column {
-            Text(emoji, fontSize = 20.sp)
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(value, fontSize = 22.sp, fontWeight = FontWeight.Black, color = CleanText)
-            Text(label, fontSize = 11.sp, color = CleanTextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+private fun ProfileRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 14.sp, color = CleanTextDim)
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = CleanText)
     }
+    HorizontalDivider(color = CleanSurfaceVariant.copy(alpha = 0.5f))
 }
 
 @Composable
@@ -330,12 +272,7 @@ private fun ProfileItemRow(
     ) {
         Box(modifier = Modifier.size(44.dp).clip(CircleShape).background(Brush.linearGradient(listOf(item.primaryColor, item.secondaryColor))), contentAlignment = Alignment.Center) {
             if (resId != 0) {
-                Image(
-                    painter = painterResource(id = resId),
-                    contentDescription = item.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                Image(painter = painterResource(id = resId), contentDescription = item.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
                 Text(item.previewEmoji, fontSize = 18.sp)
             }
